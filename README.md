@@ -1,4 +1,4 @@
-# file-tree
+# Pulse – file tree for Claude
 
 A Claude Code mod that adds a file tree to the sidebar, built around two ideas: you can see at a glance which files Claude is editing, and clicking a file opens it in the app you'd normally use for it.
 
@@ -33,7 +33,7 @@ The tree opens in the sidebar when a session starts. If you close it, type `/fil
 In Claude Code, run:
 
 ```
-/plugin marketplace add its-coughfee/file-tree
+/plugin marketplace add its-coughfee/pulse-file-tree
 /plugin install file-tree@alex-plugins
 ```
 
