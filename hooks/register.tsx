@@ -30,36 +30,38 @@ const markSvg = (isPulsing: boolean) => `<svg xmlns="http://www.w3.org/2000/svg"
   </g>
 </svg>`
 
-// a file-type badge: a page with a coloured label, or a folder
-const TYPE_COLORS: Record<string, [string, string]> = {
-  md: ['MD', '#4C8BF5'],
-  json: ['{}', '#E5A72B'],
-  ts: ['TS', '#3178C6'],
-  tsx: ['TS', '#3178C6'],
-  js: ['JS', '#D4B11E'],
-  py: ['PY', '#3E7CB1'],
-  html: ['<>', '#E3633A'],
-  css: ['#', '#8E5CD9'],
-  txt: ['T', '#8A8A8A'],
-  csv: ['CSV', '#2E9E5B'],
-  pdf: ['PDF', '#D9433A'],
-  png: ['IMG', '#2BA39B'],
-  jpg: ['IMG', '#2BA39B'],
-  svg: ['SVG', '#2BA39B'],
+// Material Design icons (Apache 2.0), coloured by file type, for files Windows gives no icon for
+const MD = {
+  folder: 'M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z',
+  file: 'M6 2c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6H6zm7 7V3.5L18.5 9H13z',
+  text: 'M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z',
+  code: 'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z',
+  data: 'M4 7v2c0 .55-.45 1-1 1H2v4h1c.55 0 1 .45 1 1v2c0 1.65 1.35 3 3 3h3v-2H7c-.55 0-1-.45-1-1v-2c0-1.3-.84-2.42-2-2.83v-.34C5.16 11.42 6 10.3 6 9V7c0-.55.45-1 1-1h3V4H7C5.35 4 4 5.35 4 7zm17 3c-.55 0-1-.45-1-1V7c0-1.65-1.35-3-3-3h-3v2h3c.55 0 1 .45 1 1v2c0 1.3.84 2.42 2 2.83v.34c-1.16.41-2 1.52-2 2.83v2c0 .55-.45 1-1 1h-3v2h3c1.65 0 3-1.35 3-3v-2c0-.55.45-1 1-1h1v-4h-1z',
+  image: 'M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z',
+  table: 'M3 3v18h18V3H3zm8 16H5v-6h6v6zm0-8H5V5h6v6zm8 8h-6v-6h6v6zm0-8h-6V5h6v6z',
+}
+const TYPES: Record<string, [keyof typeof MD, string]> = {
+  md: ['text', '#42A5F5'],
+  txt: ['text', '#90A4AE'],
+  pdf: ['text', '#EF5350'],
+  json: ['data', '#FBC02D'],
+  ts: ['code', '#0288D1'],
+  tsx: ['code', '#0288D1'],
+  js: ['code', '#FFCA28'],
+  py: ['code', '#3E7CB1'],
+  html: ['code', '#E44D26'],
+  css: ['code', '#7E57C2'],
+  csv: ['table', '#43A047'],
+  png: ['image', '#26A69A'],
+  jpg: ['image', '#26A69A'],
+  svg: ['image', '#FFB300'],
 }
 
 const iconSvg = (entry: FsEntry) => {
-  if (entry.kind === 'dir') {
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><path d="M1.5 3.5h4.2l1.5 1.5h7.3v8.5h-13z" fill="#C9A45C"/></svg>`
-  }
   const ext = entry.name.includes('.') ? entry.name.split('.').pop()!.toLowerCase() : ''
-  const [label, color] = TYPE_COLORS[ext] ?? ['', '#8A8A8A']
-  const size = label.length > 2 ? 4.2 : 5.5
+  const [shape, color] = entry.kind === 'dir' ? (['folder', '#90A4AE'] as const) : (TYPES[ext] ?? ['file', '#90A4AE'])
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-  <path d="M3 1h7l3 3v11H3z" fill="none" stroke="${color}" stroke-width="1.2"/>
-  <text x="8" y="11.5" font-family="Segoe UI, sans-serif" font-size="${size}" font-weight="700" fill="${color}" text-anchor="middle">${label}</text>
-</svg>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><path d="${MD[shape]}" fill="${color}"/></svg>`
 }
 
 // reads one path on stdin, prints its associated icon as base64 PNG
@@ -77,15 +79,29 @@ const ICON_SCRIPT = [
 const PENDING = 'pending'
 const appIcons = new Map<string, string | undefined>()
 
-// the row a focusing click last acted on, so its own press doesn't act twice
-const DEDUPE_MS = 1000
-let lastFocusAct = { element: '', at: 0 }
+// one click can arrive as both a focus and a press, in either order; the row acts on
+// whichever comes first and skips the other, so the two don't cancel each other out.
+// Two presses in a row both act, however quick
+const DEDUPE_MS = 300
+type Via = 'focus' | 'press'
+let lastAct = { element: '', at: 0, via: 'press' as Via }
+const actOnce = (via: Via, element: string, act: () => Promise<void>) => {
+  const isTwin = lastAct.element === element && lastAct.via !== via && Date.now() - lastAct.at < DEDUPE_MS
+  // a skipped twin clears the record, so the next signal always acts
+  lastAct = isTwin ? { element: '', at: 0, via } : { element, at: Date.now(), via }
+  if (!isTwin) void act()
+}
 
 // flips the folder against what is stored now, not what a drawing saw
 const toggle = async ($: Engine, key: string) => {
   await update($, { plugin: 'file-tree', key: 'expanded' } as const, (list = []) =>
     list.includes(key) ? list.filter(one => one !== key) : [...list, key],
   )
+}
+
+// the session's own folder starts open, so its stored flag is the other way round
+const toggleRoot = async ($: Engine) => {
+  await update($, { plugin: 'file-tree', key: 'isRootClosed' } as const, (isClosed = false) => !isClosed)
 }
 
 // Explorer opens a file in its default app; says so when it can't instead of doing nothing
@@ -149,9 +165,9 @@ export const register: Register = on => {
     const result = await next(e)
     const element = e.element
     if (e.origin.kind !== 'person' || element === undefined) return result
-    lastFocusAct = { element, at: Date.now() }
-    if (element.startsWith('dir:')) await toggle($, element.slice(4))
-    else if (element.startsWith('file:')) await openFile($, element.slice(5))
+    if (element === 'root') actOnce('focus', element, () => toggleRoot($))
+    else if (element.startsWith('dir:')) actOnce('focus', element, () => toggle($, element.slice(4)))
+    else if (element.startsWith('file:')) actOnce('focus', element, () => openFile($, element.slice(5)))
 
     return result
   })
@@ -169,19 +185,15 @@ export const register: Register = on => {
     await $.state.get({ plugin: 'file-tree', key: 'iconTick' } as const)
     const open = new Set(openList)
 
-    // a press right after the click that focused this same row already acted on it
-    const pressed = (element: string, act: () => Promise<void>) => {
-      if (lastFocusAct.element === element && Date.now() - lastFocusAct.at < DEDUPE_MS) return
-      void act()
-    }
+    const pressed = (element: string, act: () => Promise<void>) => actOnce('press', element, act)
 
     const mark = (isMarked: boolean) => {
-      if (!isMarked) return <Text>{'  '}</Text>
+      if (!isMarked && !canDraw) return <Text>{'  '}</Text>
+      // the mark sits in a slot of fixed width, there or not, so it never moves the row beside it
       if (canDraw) {
         return (
-          <Box flexDirection="row">
-            <Svg source={markSvg(isWorking)} alt="Edited by Claude" width={14} height={14} />
-            <Text> </Text>
+          <Box flexDirection="row" width={3} minWidth={3} flexShrink={0}>
+            {isMarked && <Svg source={markSvg(isWorking)} alt="Edited by Claude" width={14} height={14} />}
           </Box>
         )
       }
@@ -267,11 +279,23 @@ export const register: Register = on => {
         }
       }
     }
-    await walk(root, 0)
+    const { value: isRootClosed = false } = await $.state.get({ plugin: 'file-tree', key: 'isRootClosed' } as const)
+    if (!isRootClosed) await walk(root, 1)
+
+    // the session's own folder heads the tree, open until a person closes it
+    const rootName = root.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || root
+    const rootEntry: FsEntry = { name: rootName, kind: 'dir', size: 0, mtimeMs: 0, isLink: false }
 
     return (
       <Box flexDirection="column">
-        {rows.length === 0 && <Text dimColor>This folder is empty.</Text>}
+        <Box flexDirection="row">
+          {mark(isRootClosed && marks.some(one => one.startsWith(`${norm(root)}/`)))}
+          <Button key="root" plain onPress={() => pressed('root', () => toggleRoot($))}>
+            {`${isRootClosed ? '▸' : '▾'} ${rootName}`}
+          </Button>
+          {icon(rootEntry)}
+        </Box>
+        {!isRootClosed && rows.length === 0 && <Text dimColor>{'    This folder is empty.'}</Text>}
         {rows}
       </Box>
     )
