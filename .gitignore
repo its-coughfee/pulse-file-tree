@@ -1,3 +1,12 @@
 node_modules/
 .in_use/
 .claude-plugin/types/
+SPEC.md
+QUEUE.md
+LOG/
+CLAUDE.md
+MAP.md
+TOOLS.md
+INBOX/
+temp/
+.throughliner/
