@@ -1,0 +1,5 @@
+{
+  "name": "alex-plugins",
+  "owner": { "name": "Alex" },
+  "plugins": [{ "name": "file-tree", "source": "./" }]
+}

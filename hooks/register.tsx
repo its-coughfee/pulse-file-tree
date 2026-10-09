@@ -1,0 +1,279 @@
+import { update } from 'claude-code'
+import type { FsEntry, Hook, Register, RenderChildren } from 'claude-code'
+
+// the engine interface every hook receives as $
+type Engine = Parameters<Hook<'ui.focus'>>[0]
+
+const PANE = 'file-tree'
+const MARK = '✻'
+// the real Claude starburst, near-white on transparent, 48px (source: assets/claude-mark.png)
+const MARK_PNG =
+  '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'
+const SKIP = new Set(['.git', 'node_modules', '.obsidian', '__pycache__'])
+const EDIT_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit']
+
+// Windows paths compare case-blind and with either slash
+const norm = (path: string) => path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+const join = (dir: string, name: string) => `${dir.replace(/[\\/]+$/, '')}/${name}`
+
+const byFoldersFirst = (a: FsEntry, b: FsEntry) =>
+  a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'dir' ? -1 : 1
+
+// the Claude mark as a drawing; while a turn runs it fades in and out smoothly
+const markSvg = (isPulsing: boolean) => `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="14" height="14" viewBox="0 0 48 48">
+  <g>${
+    isPulsing
+      ? '<animate attributeName="opacity" values="1;0.25;1" dur="1.6s" repeatCount="indefinite" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1"/>'
+      : ''
+  }
+    <image width="48" height="48" href="data:image/png;base64,${MARK_PNG}" xlink:href="data:image/png;base64,${MARK_PNG}"/>
+  </g>
+</svg>`
+
+// a file-type badge: a page with a coloured label, or a folder
+const TYPE_COLORS: Record<string, [string, string]> = {
+  md: ['MD', '#4C8BF5'],
+  json: ['{}', '#E5A72B'],
+  ts: ['TS', '#3178C6'],
+  tsx: ['TS', '#3178C6'],
+  js: ['JS', '#D4B11E'],
+  py: ['PY', '#3E7CB1'],
+  html: ['<>', '#E3633A'],
+  css: ['#', '#8E5CD9'],
+  txt: ['T', '#8A8A8A'],
+  csv: ['CSV', '#2E9E5B'],
+  pdf: ['PDF', '#D9433A'],
+  png: ['IMG', '#2BA39B'],
+  jpg: ['IMG', '#2BA39B'],
+  svg: ['SVG', '#2BA39B'],
+}
+
+const iconSvg = (entry: FsEntry) => {
+  if (entry.kind === 'dir') {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><path d="M1.5 3.5h4.2l1.5 1.5h7.3v8.5h-13z" fill="#C9A45C"/></svg>`
+  }
+  const ext = entry.name.includes('.') ? entry.name.split('.').pop()!.toLowerCase() : ''
+  const [label, color] = TYPE_COLORS[ext] ?? ['', '#8A8A8A']
+  const size = label.length > 2 ? 4.2 : 5.5
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <path d="M3 1h7l3 3v11H3z" fill="none" stroke="${color}" stroke-width="1.2"/>
+  <text x="8" y="11.5" font-family="Segoe UI, sans-serif" font-size="${size}" font-weight="700" fill="${color}" text-anchor="middle">${label}</text>
+</svg>`
+}
+
+// reads one path on stdin, prints its associated icon as base64 PNG
+const ICON_SCRIPT = [
+  'Add-Type -AssemblyName System.Drawing',
+  '$p = [Console]::In.ReadToEnd().Trim()',
+  '$i = [System.Drawing.Icon]::ExtractAssociatedIcon($p)',
+  '$m = New-Object System.IO.MemoryStream',
+  '$i.ToBitmap().Save($m, [System.Drawing.Imaging.ImageFormat]::Png)',
+  '[Convert]::ToBase64String($m.ToArray())',
+].join('; ')
+
+// file type → its app icon drawing (undefined when Windows gave none, PENDING while asking);
+// lasts until the mod reloads
+const PENDING = 'pending'
+const appIcons = new Map<string, string | undefined>()
+
+// the row a focusing click last acted on, so its own press doesn't act twice
+const DEDUPE_MS = 1000
+let lastFocusAct = { element: '', at: 0 }
+
+// flips the folder against what is stored now, not what a drawing saw
+const toggle = async ($: Engine, key: string) => {
+  await update($, { plugin: 'file-tree', key: 'expanded' } as const, (list = []) =>
+    list.includes(key) ? list.filter(one => one !== key) : [...list, key],
+  )
+}
+
+// Explorer opens a file in its default app; says so when it can't instead of doing nothing
+// (explorer's exit code is 1 even on success, so only a failure to start counts)
+const openFile = async ($: Engine, full: string) => {
+  const path = full.replace(/\//g, '\\')
+  try {
+    await $.process.run(['explorer.exe', path])
+  } catch (error) {
+    $.ui.toast(`Couldn't open ${path}: ${String(error)}`)
+  }
+}
+
+export const register: Register = on => {
+  on('session.start', async ($, e, next) => {
+    await $.command.register({ name: 'files', description: 'Show the file tree in the sidebar' })
+    void $.ui.open({ id: PANE, title: 'File tree' })
+
+    return next(e)
+  })
+
+  on('command.run', { command: 'files' }, async $ => {
+    await $.ui.open({ id: PANE, title: 'File tree' })
+
+    return { text: 'File tree opened.' }
+  })
+
+  on('turn.start', async ($, e, next) => {
+    await $.state.set({ plugin: 'file-tree', key: 'isFreshTurn' } as const, true)
+
+    return next(e)
+  })
+
+  // the pulse runs from the first edit until the turn ends, then the mark holds still
+  on('turn.complete', async ($, e, next) => {
+    await $.state.set({ plugin: 'file-tree', key: 'isWorking' } as const, false)
+
+    return next(e)
+  })
+
+  on('tool.call', async ($, e, next) => {
+    const ran = await next(e)
+    if (!EDIT_TOOLS.includes(e.tool) || ran.deny !== undefined) return ran
+    const input = e as { file_path?: string; notebook_path?: string }
+    const path = input.file_path ?? input.notebook_path
+    if (path === undefined) return ran
+    const { value: isFirst = false } = await $.state.get({ plugin: 'file-tree', key: 'isFreshTurn' } as const)
+    const { value: marks = [] } = await $.state.get({ plugin: 'file-tree', key: 'edited' } as const)
+    await $.state.set({ plugin: 'file-tree', key: 'isFreshTurn' } as const, false)
+    await $.state.set({ plugin: 'file-tree', key: 'isWorking' } as const, true)
+    await $.state.set({ plugin: 'file-tree', key: 'edited' } as const, [
+      ...new Set([...(isFirst ? [] : marks), norm(path)]),
+    ])
+
+    return ran
+  })
+
+  // A click on the pane while it isn't active only focuses the row and raises no press,
+  // so a person's focus landing on a row acts as the click; the press that may follow is skipped
+  on('ui.focus', { requestId: PANE }, async ($, e, next) => {
+    const result = await next(e)
+    const element = e.element
+    if (e.origin.kind !== 'person' || element === undefined) return result
+    lastFocusAct = { element, at: Date.now() }
+    if (element.startsWith('dir:')) await toggle($, element.slice(4))
+    else if (element.startsWith('file:')) await openFile($, element.slice(5))
+
+    return result
+  })
+
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const { Box, Text, Button } = $.ui.resolve(e)
+    // only the desktop, editor and phone draw pictures; the terminal keeps the text mark
+    const Svg = e.surface === 'terminal' ? undefined : $.ui.resolve({ ...e, surface: 'desktop' }).Svg
+    const canDraw = Svg !== undefined
+    const root = await $.session.cwd()
+    const { value: openList = [] } = await $.state.get({ plugin: 'file-tree', key: 'expanded' } as const)
+    const { value: marks = [] } = await $.state.get({ plugin: 'file-tree', key: 'edited' } as const)
+    const { value: isWorking = false } = await $.state.get({ plugin: 'file-tree', key: 'isWorking' } as const)
+    // read only so an icon arriving redraws the pane
+    await $.state.get({ plugin: 'file-tree', key: 'iconTick' } as const)
+    const open = new Set(openList)
+
+    // a press right after the click that focused this same row already acted on it
+    const pressed = (element: string, act: () => Promise<void>) => {
+      if (lastFocusAct.element === element && Date.now() - lastFocusAct.at < DEDUPE_MS) return
+      void act()
+    }
+
+    const mark = (isMarked: boolean) => {
+      if (!isMarked) return <Text>{'  '}</Text>
+      if (canDraw) {
+        return (
+          <Box flexDirection="row">
+            <Svg source={markSvg(isWorking)} alt="Edited by Claude" width={14} height={14} />
+            <Text> </Text>
+          </Box>
+        )
+      }
+
+      return <Text color="claude">{MARK} </Text>
+    }
+
+    // the icon of the app Windows opens this file type with, as File Explorer shows it,
+    // asked once per file type and kept. The drawing never waits for it: the badge shows
+    // until Windows answers, then a bump of iconTick redraws with the real icon
+    const appIcon = (full: string, name: string) => {
+      const type = name.includes('.') ? name.split('.').pop()!.toLowerCase() : name.toLowerCase()
+      if (!appIcons.has(type)) {
+        appIcons.set(type, PENDING)
+        void $.process
+          .run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', ICON_SCRIPT], {
+            stdin: full.replace(/\//g, '\\'),
+          })
+          .then(({ stdout }) => {
+            const png = stdout.trim()
+            appIcons.set(
+              type,
+              /^[A-Za-z0-9+/=]+$/.test(png) && png.length > 0
+                ? `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="16" height="16" viewBox="0 0 32 32"><image width="32" height="32" href="data:image/png;base64,${png}" xlink:href="data:image/png;base64,${png}"/></svg>`
+                : undefined,
+            )
+          })
+          .catch(() => appIcons.set(type, undefined))
+          .then(() => $.state.set({ plugin: 'file-tree', key: 'iconTick' } as const, Date.now()))
+          .catch(() => undefined)
+      }
+      const found = appIcons.get(type)
+
+      return found === PENDING ? undefined : found
+    }
+
+    const icon = (entry: FsEntry, source?: string) =>
+      canDraw ? (
+        <Box flexDirection="row">
+          <Text> </Text>
+          <Svg source={source ?? iconSvg(entry)} alt={entry.kind === 'dir' ? 'Folder' : 'File'} width={16} height={16} />
+        </Box>
+      ) : null
+
+    const rows: RenderChildren[] = []
+    const walk = async (dir: string, depth: number) => {
+      let entries: FsEntry[] = []
+      try {
+        entries = await $.fs.list(dir)
+      } catch {
+        return
+      }
+      for (const entry of entries.filter(one => !SKIP.has(one.name)).sort(byFoldersFirst)) {
+        const full = join(dir, entry.name)
+        const key = norm(full)
+        const indent = '  '.repeat(depth)
+        if (entry.kind === 'dir') {
+          const isOpen = open.has(key)
+          const hasEdits = !isOpen && marks.some(one => one.startsWith(`${key}/`))
+          rows.push(
+            <Box flexDirection="row">
+              <Text>{indent}</Text>
+              {mark(hasEdits)}
+              <Button key={`dir:${key}`} plain onPress={() => pressed(`dir:${key}`, () => toggle($, key))}>
+                {`${isOpen ? '▾' : '▸'} ${entry.name}`}
+              </Button>
+              {icon(entry)}
+            </Box>,
+          )
+          if (isOpen) await walk(full, depth + 1)
+        } else {
+          const source = canDraw ? appIcon(full, entry.name) : undefined
+          rows.push(
+            <Box flexDirection="row">
+              <Text>{indent}</Text>
+              {mark(marks.includes(key))}
+              <Button key={`file:${key}`} plain dimColor onPress={() => pressed(`file:${key}`, () => openFile($, full))}>
+                {`  ${entry.name}`}
+              </Button>
+              {icon(entry, source)}
+            </Box>,
+          )
+        }
+      }
+    }
+    await walk(root, 0)
+
+    return (
+      <Box flexDirection="column">
+        {rows.length === 0 && <Text dimColor>This folder is empty.</Text>}
+        {rows}
+      </Box>
+    )
+  })
+}

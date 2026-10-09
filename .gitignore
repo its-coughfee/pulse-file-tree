@@ -1,0 +1,3 @@
+node_modules/
+.in_use/
+.claude-plugin/types/

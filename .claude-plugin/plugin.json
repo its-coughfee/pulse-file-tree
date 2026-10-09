@@ -1,0 +1,6 @@
+{
+  "name": "file-tree",
+  "version": "0.1.15",
+  "description": "Sidebar file tree that opens files in their default app and pulses a Claude mark on files edited in the latest turn",
+  "types": "./types/index.d.ts"
+}
