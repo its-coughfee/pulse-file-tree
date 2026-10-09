@@ -1,10 +1,11 @@
 import { update } from 'claude-code'
 import type { FsEntry, Hook, Register, RenderChildren } from 'claude-code'
+import { BY_EXTENSION, BY_NAME, ICONS } from './icons'
 
 // the engine interface every hook receives as $
 type Engine = Parameters<Hook<'ui.focus'>>[0]
 
-const PANE = 'file-tree'
+const PANE = 'pulse'
 const MARK = '✻'
 // the real Claude starburst, near-white on transparent, 48px (source: assets/claude-mark.png)
 const MARK_PNG =
@@ -30,54 +31,14 @@ const markSvg = (isPulsing: boolean) => `<svg xmlns="http://www.w3.org/2000/svg"
   </g>
 </svg>`
 
-// Material Design icons (Apache 2.0), coloured by file type, for files Windows gives no icon for
-const MD = {
-  folder: 'M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z',
-  file: 'M6 2c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6H6zm7 7V3.5L18.5 9H13z',
-  text: 'M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z',
-  code: 'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z',
-  data: 'M4 7v2c0 .55-.45 1-1 1H2v4h1c.55 0 1 .45 1 1v2c0 1.65 1.35 3 3 3h3v-2H7c-.55 0-1-.45-1-1v-2c0-1.3-.84-2.42-2-2.83v-.34C5.16 11.42 6 10.3 6 9V7c0-.55.45-1 1-1h3V4H7C5.35 4 4 5.35 4 7zm17 3c-.55 0-1-.45-1-1V7c0-1.65-1.35-3-3-3h-3v2h3c.55 0 1 .45 1 1v2c0 1.3.84 2.42 2 2.83v.34c-1.16.41-2 1.52-2 2.83v2c0 .55-.45 1-1 1h-3v2h3c1.65 0 3-1.35 3-3v-2c0-.55.45-1 1-1h1v-4h-1z',
-  image: 'M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z',
-  table: 'M3 3v18h18V3H3zm8 16H5v-6h6v6zm0-8H5V5h6v6zm8 8h-6v-6h6v6zm0-8h-6V5h6v6z',
-}
-const TYPES: Record<string, [keyof typeof MD, string]> = {
-  md: ['text', '#42A5F5'],
-  txt: ['text', '#90A4AE'],
-  pdf: ['text', '#EF5350'],
-  json: ['data', '#FBC02D'],
-  ts: ['code', '#0288D1'],
-  tsx: ['code', '#0288D1'],
-  js: ['code', '#FFCA28'],
-  py: ['code', '#3E7CB1'],
-  html: ['code', '#E44D26'],
-  css: ['code', '#7E57C2'],
-  csv: ['table', '#43A047'],
-  png: ['image', '#26A69A'],
-  jpg: ['image', '#26A69A'],
-  svg: ['image', '#FFB300'],
-}
-
+// each file type's Material Icon Theme icon (see icons/), a plain page for any other
 const iconSvg = (entry: FsEntry) => {
-  const ext = entry.name.includes('.') ? entry.name.split('.').pop()!.toLowerCase() : ''
-  const [shape, color] = entry.kind === 'dir' ? (['folder', '#90A4AE'] as const) : (TYPES[ext] ?? ['file', '#90A4AE'])
+  const name = entry.name.toLowerCase()
+  const ext = name.includes('.') ? name.split('.').pop()! : ''
+  const kind = entry.kind === 'dir' ? 'folder' : (BY_NAME[name] ?? BY_EXTENSION[ext] ?? 'file')
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><path d="${MD[shape]}" fill="${color}"/></svg>`
+  return ICONS[kind] ?? ICONS['file']!
 }
-
-// reads one path on stdin, prints its associated icon as base64 PNG
-const ICON_SCRIPT = [
-  'Add-Type -AssemblyName System.Drawing',
-  '$p = [Console]::In.ReadToEnd().Trim()',
-  '$i = [System.Drawing.Icon]::ExtractAssociatedIcon($p)',
-  '$m = New-Object System.IO.MemoryStream',
-  '$i.ToBitmap().Save($m, [System.Drawing.Imaging.ImageFormat]::Png)',
-  '[Convert]::ToBase64String($m.ToArray())',
-].join('; ')
-
-// file type → its app icon drawing (undefined when Windows gave none, PENDING while asking);
-// lasts until the mod reloads
-const PENDING = 'pending'
-const appIcons = new Map<string, string | undefined>()
 
 // one click can arrive as both a focus and a press, in either order; the row acts on
 // whichever comes first and skips the other, so the two don't cancel each other out.
@@ -94,14 +55,14 @@ const actOnce = (via: Via, element: string, act: () => Promise<void>) => {
 
 // flips the folder against what is stored now, not what a drawing saw
 const toggle = async ($: Engine, key: string) => {
-  await update($, { plugin: 'file-tree', key: 'expanded' } as const, (list = []) =>
+  await update($, { plugin: 'pulse', key: 'expanded' } as const, (list = []) =>
     list.includes(key) ? list.filter(one => one !== key) : [...list, key],
   )
 }
 
 // the session's own folder starts open, so its stored flag is the other way round
 const toggleRoot = async ($: Engine) => {
-  await update($, { plugin: 'file-tree', key: 'isRootClosed' } as const, (isClosed = false) => !isClosed)
+  await update($, { plugin: 'pulse', key: 'isRootClosed' } as const, (isClosed = false) => !isClosed)
 }
 
 // Explorer opens a file in its default app; says so when it can't instead of doing nothing
@@ -130,14 +91,14 @@ export const register: Register = on => {
   })
 
   on('turn.start', async ($, e, next) => {
-    await $.state.set({ plugin: 'file-tree', key: 'isFreshTurn' } as const, true)
+    await $.state.set({ plugin: 'pulse', key: 'isFreshTurn' } as const, true)
 
     return next(e)
   })
 
   // the pulse runs from the first edit until the turn ends, then the mark holds still
   on('turn.complete', async ($, e, next) => {
-    await $.state.set({ plugin: 'file-tree', key: 'isWorking' } as const, false)
+    await $.state.set({ plugin: 'pulse', key: 'isWorking' } as const, false)
 
     return next(e)
   })
@@ -148,11 +109,11 @@ export const register: Register = on => {
     const input = e as { file_path?: string; notebook_path?: string }
     const path = input.file_path ?? input.notebook_path
     if (path === undefined) return ran
-    const { value: isFirst = false } = await $.state.get({ plugin: 'file-tree', key: 'isFreshTurn' } as const)
-    const { value: marks = [] } = await $.state.get({ plugin: 'file-tree', key: 'edited' } as const)
-    await $.state.set({ plugin: 'file-tree', key: 'isFreshTurn' } as const, false)
-    await $.state.set({ plugin: 'file-tree', key: 'isWorking' } as const, true)
-    await $.state.set({ plugin: 'file-tree', key: 'edited' } as const, [
+    const { value: isFirst = false } = await $.state.get({ plugin: 'pulse', key: 'isFreshTurn' } as const)
+    const { value: marks = [] } = await $.state.get({ plugin: 'pulse', key: 'edited' } as const)
+    await $.state.set({ plugin: 'pulse', key: 'isFreshTurn' } as const, false)
+    await $.state.set({ plugin: 'pulse', key: 'isWorking' } as const, true)
+    await $.state.set({ plugin: 'pulse', key: 'edited' } as const, [
       ...new Set([...(isFirst ? [] : marks), norm(path)]),
     ])
 
@@ -178,11 +139,9 @@ export const register: Register = on => {
     const Svg = e.surface === 'terminal' ? undefined : $.ui.resolve({ ...e, surface: 'desktop' }).Svg
     const canDraw = Svg !== undefined
     const root = await $.session.cwd()
-    const { value: openList = [] } = await $.state.get({ plugin: 'file-tree', key: 'expanded' } as const)
-    const { value: marks = [] } = await $.state.get({ plugin: 'file-tree', key: 'edited' } as const)
-    const { value: isWorking = false } = await $.state.get({ plugin: 'file-tree', key: 'isWorking' } as const)
-    // read only so an icon arriving redraws the pane
-    await $.state.get({ plugin: 'file-tree', key: 'iconTick' } as const)
+    const { value: openList = [] } = await $.state.get({ plugin: 'pulse', key: 'expanded' } as const)
+    const { value: marks = [] } = await $.state.get({ plugin: 'pulse', key: 'edited' } as const)
+    const { value: isWorking = false } = await $.state.get({ plugin: 'pulse', key: 'isWorking' } as const)
     const open = new Set(openList)
 
     const pressed = (element: string, act: () => Promise<void>) => actOnce('press', element, act)
@@ -193,7 +152,7 @@ export const register: Register = on => {
       if (canDraw) {
         return (
           <Box flexDirection="row" width={3} minWidth={3} flexShrink={0}>
-            {isMarked && <Svg source={markSvg(isWorking)} alt="Edited by Claude" width={14} height={14} />}
+            {isMarked ? <Svg source={markSvg(isWorking)} alt="Edited by Claude" width={14} height={14} /> : <Text>{' '}</Text>}
           </Box>
         )
       }
@@ -201,40 +160,11 @@ export const register: Register = on => {
       return <Text color="claude">{MARK} </Text>
     }
 
-    // the icon of the app Windows opens this file type with, as File Explorer shows it,
-    // asked once per file type and kept. The drawing never waits for it: the badge shows
-    // until Windows answers, then a bump of iconTick redraws with the real icon
-    const appIcon = (full: string, name: string) => {
-      const type = name.includes('.') ? name.split('.').pop()!.toLowerCase() : name.toLowerCase()
-      if (!appIcons.has(type)) {
-        appIcons.set(type, PENDING)
-        void $.process
-          .run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', ICON_SCRIPT], {
-            stdin: full.replace(/\//g, '\\'),
-          })
-          .then(({ stdout }) => {
-            const png = stdout.trim()
-            appIcons.set(
-              type,
-              /^[A-Za-z0-9+/=]+$/.test(png) && png.length > 0
-                ? `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="16" height="16" viewBox="0 0 32 32"><image width="32" height="32" href="data:image/png;base64,${png}" xlink:href="data:image/png;base64,${png}"/></svg>`
-                : undefined,
-            )
-          })
-          .catch(() => appIcons.set(type, undefined))
-          .then(() => $.state.set({ plugin: 'file-tree', key: 'iconTick' } as const, Date.now()))
-          .catch(() => undefined)
-      }
-      const found = appIcons.get(type)
-
-      return found === PENDING ? undefined : found
-    }
-
-    const icon = (entry: FsEntry, source?: string) =>
+    const icon = (entry: FsEntry) =>
       canDraw ? (
-        <Box flexDirection="row">
+        <Box flexDirection="row" flexShrink={0}>
           <Text> </Text>
-          <Svg source={source ?? iconSvg(entry)} alt={entry.kind === 'dir' ? 'Folder' : 'File'} width={16} height={16} />
+          <Svg source={iconSvg(entry)} alt={entry.kind === 'dir' ? 'Folder' : 'File'} width={16} height={16} />
         </Box>
       ) : null
 
@@ -249,37 +179,39 @@ export const register: Register = on => {
       for (const entry of entries.filter(one => !SKIP.has(one.name)).sort(byFoldersFirst)) {
         const full = join(dir, entry.name)
         const key = norm(full)
-        const indent = '  '.repeat(depth)
+        // the indent is padding and the name the only part allowed to give way, so a long
+        // name gets cut short at the edge instead of squeezing its row out of line
         if (entry.kind === 'dir') {
           const isOpen = open.has(key)
           const hasEdits = !isOpen && marks.some(one => one.startsWith(`${key}/`))
           rows.push(
-            <Box flexDirection="row">
-              <Text>{indent}</Text>
+            <Box flexDirection="row" paddingLeft={depth * 2}>
               {mark(hasEdits)}
-              <Button key={`dir:${key}`} plain onPress={() => pressed(`dir:${key}`, () => toggle($, key))}>
-                {`${isOpen ? '▾' : '▸'} ${entry.name}`}
-              </Button>
+              <Box flexShrink={1} minWidth={0} overflow="hidden">
+                <Button key={`dir:${key}`} plain onPress={() => pressed(`dir:${key}`, () => toggle($, key))}>
+                  {`${isOpen ? '▾' : '▸'} ${entry.name}`}
+                </Button>
+              </Box>
               {icon(entry)}
             </Box>,
           )
           if (isOpen) await walk(full, depth + 1)
         } else {
-          const source = canDraw ? appIcon(full, entry.name) : undefined
           rows.push(
-            <Box flexDirection="row">
-              <Text>{indent}</Text>
+            <Box flexDirection="row" paddingLeft={depth * 2}>
               {mark(marks.includes(key))}
-              <Button key={`file:${key}`} plain dimColor onPress={() => pressed(`file:${key}`, () => openFile($, full))}>
-                {`  ${entry.name}`}
-              </Button>
-              {icon(entry, source)}
+              <Box flexShrink={1} minWidth={0} overflow="hidden">
+                <Button key={`file:${key}`} plain dimColor onPress={() => pressed(`file:${key}`, () => openFile($, full))}>
+                  {`  ${entry.name}`}
+                </Button>
+              </Box>
+              {icon(entry)}
             </Box>,
           )
         }
       }
     }
-    const { value: isRootClosed = false } = await $.state.get({ plugin: 'file-tree', key: 'isRootClosed' } as const)
+    const { value: isRootClosed = false } = await $.state.get({ plugin: 'pulse', key: 'isRootClosed' } as const)
     if (!isRootClosed) await walk(root, 1)
 
     // the session's own folder heads the tree, open until a person closes it

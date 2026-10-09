@@ -1,6 +1,6 @@
 declare module 'claude-code' {
   interface PluginState {
-    'file-tree': {
+    pulse: {
       // folders the person has expanded, normalised paths
       expanded: string[]
       // files Claude edited in the current (or, until it edits, the last) turn
@@ -9,8 +9,8 @@ declare module 'claude-code' {
       isFreshTurn: boolean
       // true from Claude's first edit until the turn ends: the mark pulses
       isWorking: boolean
-      // bumped when a file type's app icon arrives from Windows, to redraw the pane
-      iconTick: number
+      // true once a person closes the session's own folder, which starts open
+      isRootClosed: boolean
     }
   }
 }

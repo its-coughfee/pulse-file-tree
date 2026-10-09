@@ -1,7 +1,6 @@
 # Pulse – file tree for Claude
 
 A Claude Code mod that adds a file tree to the sidebar, built around two ideas: you can see at a glance which files Claude is editing, and clicking a file opens it in the app you'd normally use for it.
-
 ## What makes it different
 
 ### A pulsing mark shows what Claude is editing
@@ -18,7 +17,7 @@ The mark appears for anything Claude changes with its Edit, Write, MultiEdit or 
 
 Clicking a file doesn't open it inside Claude Code. It opens in whatever app Windows uses for that file type: a Markdown note in Obsidian, a spreadsheet in Excel, a PDF in your PDF reader, an image in your photo viewer. It's the same as double-clicking the file in File Explorer. If the file can't be opened, a short message says so.
 
-Each file shows its app's own icon, so you can tell file types apart without reading the names. Where Windows has no icon, a Material Design icon in the file type's colour shows instead: code brackets for code files, a lined page for text and Markdown, curly braces for JSON, a picture for images and a grid for CSV.
+Each file shows an icon for its type from [Material Icon Theme](https://github.com/material-extensions/vscode-material-icon-theme), the same icons many people know from VS Code, so you can tell file types apart without reading the names. Around 45 common types have their own icon, from HTML, JavaScript and Python to Word, PDF, spreadsheets, images, audio and video. Any other type gets a plain page icon.
 
 ## Using it
 
@@ -34,9 +33,13 @@ In Claude Code, run:
 
 ```
 /plugin marketplace add its-coughfee/pulse-file-tree
-/plugin install file-tree@alex-plugins
+/plugin install pulse@alex-plugins
 ```
 
 ## Requirements
 
-Windows only. Opening files and fetching their icons both rely on Windows (File Explorer and PowerShell).
+Windows only. Opening files relies on File Explorer.
+
+## Credits
+
+File and folder icons are from [Material Icon Theme](https://github.com/material-extensions/vscode-material-icon-theme) by Material Extensions, used under the MIT licence (see [icons/LICENSE](icons/LICENSE)).
