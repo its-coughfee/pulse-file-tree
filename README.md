@@ -33,7 +33,7 @@ The tree opens in the sidebar when a session starts. If you close it, type `/fil
 In Claude Code, run:
 
 ```
-/plugin marketplace add FlintCraftTech/file-tree
+/plugin marketplace add its-coughfee/file-tree
 /plugin install file-tree@alex-plugins
 ```
 
