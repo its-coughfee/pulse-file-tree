@@ -7,7 +7,7 @@ type Engine = Parameters<Hook<'ui.focus'>>[0]
 
 const PANE = 'pulse'
 const MARK = '✻'
-// the real Claude starburst, near-white on transparent, 48px (source: assets/claude-mark.png)
+// the real Claude starburst, near-white on transparent, 48px, embedded as base64
 const MARK_PNG =
   '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'
 const SKIP = new Set(['.git', 'node_modules', '.obsidian', '__pycache__'])
@@ -31,7 +31,7 @@ const markSvg = (isPulsing: boolean) => `<svg xmlns="http://www.w3.org/2000/svg"
   </g>
 </svg>`
 
-// each file type's Material Icon Theme icon (see icons/), a plain page for any other
+// each file type's Material Icon Theme icon (drawings in icons.ts), a plain page for any other
 const iconSvg = (entry: FsEntry) => {
   const name = entry.name.toLowerCase()
   const ext = name.includes('.') ? name.split('.').pop()! : ''
@@ -218,8 +218,12 @@ export const register: Register = on => {
     const rootName = root.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || root
     const rootEntry: FsEntry = { name: rootName, kind: 'dir', size: 0, mtimeMs: 0, isLink: false }
 
+    // throwaway mouse probe, only on the surfaces that run surface modules; drag replaces it
+    const Client = e.surface === 'terminal' || e.surface === 'desktop' ? $.ui.resolve({ ...e, surface: e.surface }).Client : undefined
+
     return (
       <Box flexDirection="column">
+        {Client !== undefined && <Client key="mouse-probe" module="./mouse-probe.tsx" />}
         <Box flexDirection="row">
           {mark(isRootClosed && marks.some(one => one.startsWith(`${norm(root)}/`)))}
           <Button key="root" plain onPress={() => pressed('root', () => toggleRoot($))}>
