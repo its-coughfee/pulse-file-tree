@@ -3,6 +3,8 @@
 A Claude Code mod that adds a file tree to the sidebar that enables you to: 
 - See at a glance which files Claude is editing 
 - clicking a file opens it in the default app, such as obsidian.
+- navigate above project root
+- drag and drop files to move inside tree
 
 ## What makes it different
 
@@ -22,6 +24,12 @@ Clicking a file doesn't open it inside Claude Code. It opens in whatever app Win
 
 Each file shows an icon for its type from [Material Icon Theme](https://github.com/material-extensions/vscode-material-icon-theme),  so you can tell file types apart without reading the names.
 
+### Drag and drop files to move inside tree
+
+Hold the left mouse button on a file and drag it. Drop it on a folder to move the file there; resting on a closed folder for a moment opens it. While you drag, two drop targets appear at the top of the pane: **Delete** sends the file to the Recycle Bin, and **Add to prompt** puts the file's path into Claude's prompt box.
+### Navigate above project root
+
+A dimmed line above the project folder shows its parent folder, shortened (for example `C:\…\mods`). Click it to unfold every folder from the drive down to your project, so you can open nearby folders and files without leaving the tree. Two buttons sit at the top of the pane: **Return to root** folds the path back to that single line, and **Collapse all** closes every open folder except the project folder and the path down to it.
 
 ## Using it
 
@@ -43,6 +51,8 @@ In Claude Code, run:
 ## Requirements
 
 Windows only. Opening files relies on File Explorer.
+
+Needs Claude Code 2.1.295 or newer.
 
 ## Credits
 

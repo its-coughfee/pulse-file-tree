@@ -65,6 +65,35 @@ const toggleRoot = async ($: Engine) => {
   await update($, { plugin: 'pulse', key: 'isRootClosed' } as const, (isClosed = false) => !isClosed)
 }
 
+const setPathOpen = async ($: Engine, isOpen: boolean) => {
+  await $.state.set({ plugin: 'pulse', key: 'isPathOpen' } as const, isOpen)
+}
+
+// closes every folder the person opened; the project folder and the path down to it stay open
+const collapseAll = async ($: Engine) => {
+  await $.state.set({ plugin: 'pulse', key: 'expanded' } as const, [])
+  await $.state.set({ plugin: 'pulse', key: 'isRootClosed' } as const, false)
+}
+
+// the folders from the drive down to the session's folder, each as a full path
+const ancestorsOf = (root: string) => {
+  const parts = root.replace(/[\\/]+$/, '').split(/[\\/]/)
+  const drive = parts[0] === '' ? '/' : `${parts[0]}/`
+  const chain = [drive]
+  for (const part of parts.slice(1).filter(Boolean)) chain.push(join(chain[chain.length - 1]!, part))
+
+  return chain
+}
+
+// the parent folder, shortened to the drive and its own name: C:\…\mods
+const shortParent = (root: string) => {
+  const parts = root.replace(/[\\/]+$/, '').split(/[\\/]/)
+  const parents = parts.slice(0, -1)
+  if (parents.length <= 1) return `${parents[0] ?? ''}\\`
+
+  return parents.length === 2 ? parents.join('\\') : `${parents[0]}\\…\\${parents[parents.length - 1]}`
+}
+
 // Explorer opens a file in its default app; says so when it can't instead of doing nothing
 // (explorer's exit code is 1 even on success, so only a failure to start counts)
 const openFile = async ($: Engine, full: string) => {
@@ -74,6 +103,101 @@ const openFile = async ($: Engine, full: string) => {
   } catch (error) {
     $.ui.toast(`Couldn't open ${path}: ${String(error)}`)
   }
+}
+
+// The pane draws one line per row, so a pointer's line says what it is over. The lines
+// above the tree are fixed: the buttons, then the drop icons, then the path line when shown
+const DROP_LINE = 1
+// the drop row reads "[ Delete ]  [ Add to prompt ]": columns before this are Delete
+const DELETE_END = 11
+const DROP_ICONS = '[ Delete ]  [ Add to prompt ]'
+// how long a dragged file rests on a closed folder before it opens
+const HOVER_OPEN_MS = 700
+
+// a folder a dragged file can be dropped into, by the line it was last drawn on
+type Target = { full: string; key: string; isOpen: boolean; isProject: boolean }
+let targets: (Target | undefined)[] = []
+let hovered = ''
+
+type Dropped = { kind: 'drag' | 'drop' | 'open'; path: string; line: number; x: number }
+const isDropped = (data: unknown): data is Dropped => {
+  const one = data as Partial<Dropped> | null
+  return (
+    typeof one === 'object' && one !== null && typeof one.path === 'string' &&
+    (one.kind === 'open' || ((one.kind === 'drag' || one.kind === 'drop') && typeof one.line === 'number' && typeof one.x === 'number'))
+  )
+}
+
+const windows = (path: string) => path.replace(/\//g, '\\')
+const nameOf = (path: string) => path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? path
+const parentOf = (path: string) => path.replace(/[\\/]+$/, '').replace(/[\\/][^\\/]*$/, '')
+
+// PowerShell does the moving and recycling; the paths go in as variables, never as code
+const powershell = async ($: Engine, script: string, env: Record<string, string>, failed: string) => {
+  try {
+    const ran = await $.process.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', script], { env })
+    if (ran.exitCode !== 0) $.ui.toast(`${failed}: ${ran.stderr.trim() || `exit ${ran.exitCode}`}`)
+  } catch (error) {
+    $.ui.toast(`${failed}: ${String(error)}`)
+  }
+}
+
+const moveInto = async ($: Engine, file: string, folder: string) => {
+  if (norm(parentOf(file)) === norm(folder)) return
+  await powershell(
+    $,
+    'Move-Item -LiteralPath $env:PULSE_FROM -Destination $env:PULSE_TO -ErrorAction Stop',
+    { PULSE_FROM: windows(file), PULSE_TO: windows(folder) },
+    `Couldn't move ${nameOf(file)}`,
+  )
+}
+
+// the Recycle Bin is the undo, so there is no confirmation
+const recycle = async ($: Engine, file: string) => {
+  await powershell(
+    $,
+    "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($env:PULSE_FROM, 'OnlyErrorDialogs', 'SendToRecycleBin')",
+    { PULSE_FROM: windows(file) },
+    `Couldn't delete ${nameOf(file)}`,
+  )
+}
+
+const addToPrompt = async ($: Engine, file: string) => {
+  await $.prompt.fill({ text: `${windows(file)} `, mode: 'insert' })
+}
+
+const setDragging = async ($: Engine, path: string) => {
+  await $.state.set({ plugin: 'pulse', key: 'dragging' } as const, path)
+}
+
+// a dragged file resting on a closed folder opens it, unless the pointer has moved on
+const hoverOpen = async ($: Engine, target: Target) => {
+  if (hovered === target.key) return
+  hovered = target.key
+  await $.clock.sleep(HOVER_OPEN_MS)
+  const { value: dragging = '' } = await $.state.get({ plugin: 'pulse', key: 'dragging' } as const)
+  if (hovered !== target.key || dragging === '') return
+  if (target.isProject) await $.state.set({ plugin: 'pulse', key: 'isRootClosed' } as const, false)
+  else await update($, { plugin: 'pulse', key: 'expanded' } as const, (list = []) => (list.includes(target.key) ? list : [...list, target.key]))
+}
+
+const onDropped = async ($: Engine, data: Dropped) => {
+  if (data.kind === 'open') {
+    await openFile($, data.path)
+    return
+  }
+  const target = targets[data.line]
+  if (data.kind === 'drag') {
+    const { value: dragging = '' } = await $.state.get({ plugin: 'pulse', key: 'dragging' } as const)
+    if (dragging !== data.path) await setDragging($, data.path)
+    if (target !== undefined && !target.isOpen) void hoverOpen($, target)
+    else hovered = ''
+    return
+  }
+  hovered = ''
+  await setDragging($, '')
+  if (data.line === DROP_LINE) await (data.x < DELETE_END ? recycle($, data.path) : addToPrompt($, data.path))
+  else if (target !== undefined) await moveInto($, data.path, target.full)
 }
 
 export const register: Register = on => {
@@ -113,6 +237,7 @@ export const register: Register = on => {
     const { value: marks = [] } = await $.state.get({ plugin: 'pulse', key: 'edited' } as const)
     await $.state.set({ plugin: 'pulse', key: 'isFreshTurn' } as const, false)
     await $.state.set({ plugin: 'pulse', key: 'isWorking' } as const, true)
+    await $.state.set({ plugin: 'pulse', key: 'lastEdited' } as const, norm(path))
     await $.state.set({ plugin: 'pulse', key: 'edited' } as const, [
       ...new Set([...(isFirst ? [] : marks), norm(path)]),
     ])
@@ -127,8 +252,19 @@ export const register: Register = on => {
     const element = e.element
     if (e.origin.kind !== 'person' || element === undefined) return result
     if (element === 'root') actOnce('focus', element, () => toggleRoot($))
+    else if (element === 'path') actOnce('focus', element, () => setPathOpen($, true))
+    else if (element === 'return-root') actOnce('focus', element, () => setPathOpen($, false))
+    else if (element === 'collapse-all') actOnce('focus', element, () => collapseAll($))
     else if (element.startsWith('dir:')) actOnce('focus', element, () => toggle($, element.slice(4)))
     else if (element.startsWith('file:')) actOnce('focus', element, () => openFile($, element.slice(5)))
+
+    return result
+  })
+
+  // a file row's pointer region reports clicks, drags and drops
+  on('ui.message', { requestId: PANE }, async ($, e, next) => {
+    const result = await next(e)
+    if (e.module.endsWith('file-row.tsx') && isDropped(e.data)) await onDropped($, e.data)
 
     return result
   })
@@ -146,13 +282,17 @@ export const register: Register = on => {
 
     const pressed = (element: string, act: () => Promise<void>) => actOnce('press', element, act)
 
-    const mark = (isMarked: boolean) => {
+    const { value: lastEdited = '' } = await $.state.get({ plugin: 'pulse', key: 'lastEdited' } as const)
+    // only the latest edit pulses, and only while the turn runs; a closed folder pulses for it
+    const isLatestIn = (key: string) => lastEdited !== '' && (lastEdited === key || lastEdited.startsWith(`${key}/`))
+
+    const mark = (isMarked: boolean, isLatest = false) => {
       if (!isMarked && !canDraw) return <Text>{'  '}</Text>
       // the mark sits in a slot of fixed width, there or not, so it never moves the row beside it
       if (canDraw) {
         return (
           <Box flexDirection="row" width={3} minWidth={3} flexShrink={0}>
-            {isMarked ? <Svg source={markSvg(isWorking)} alt="Edited by Claude" width={14} height={14} /> : <Text>{' '}</Text>}
+            {isMarked ? <Svg source={markSvg(isWorking && isLatest)} alt="Edited by Claude" width={14} height={14} /> : <Text>{' '}</Text>}
           </Box>
         )
       }
@@ -168,25 +308,94 @@ export const register: Register = on => {
         </Box>
       ) : null
 
+    const { value: isRootClosed = false } = await $.state.get({ plugin: 'pulse', key: 'isRootClosed' } as const)
+    const { value: isPathOpen = false } = await $.state.get({ plugin: 'pulse', key: 'isPathOpen' } as const)
+
+    // the session's own folder heads its part of the tree, open until a person closes it
+    const rootName = root.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || root
+    const rootEntry: FsEntry = { name: rootName, kind: 'dir', size: 0, mtimeMs: 0, isLink: false }
+
+    const { value: dragging = '' } = await $.state.get({ plugin: 'pulse', key: 'dragging' } as const)
+    // file rows hear the pointer only where surface modules run; elsewhere they stay buttons
+    const Client = e.surface === 'terminal' || e.surface === 'desktop' ? $.ui.resolve({ ...e, surface: e.surface }).Client : undefined
+    const ancestors = ancestorsOf(root)
+    const isPathLineShown = !isPathOpen && ancestors.length > 1
+    // the tree's first row sits under the buttons, the drop row and the path line
+    const firstLine = DROP_LINE + 1 + (isPathLineShown ? 1 : 0)
+    const markWidth = canDraw ? 3 : 2
+
     const rows: RenderChildren[] = []
-    const walk = async (dir: string, depth: number) => {
+    const lineTargets: (Target | undefined)[] = []
+    const add = (row: RenderChildren, target?: Target) => {
+      rows.push(row)
+      lineTargets[firstLine + rows.length - 1] = target
+    }
+    const projectRow = async (depth: number) => {
+      add(
+        <Box flexDirection="row" paddingLeft={depth * 2}>
+          {mark(isRootClosed && marks.some(one => one.startsWith(`${norm(root)}/`)), isRootClosed && isLatestIn(norm(root)))}
+          <Button key="root" plain onPress={() => pressed('root', () => toggleRoot($))}>
+            {`${isRootClosed ? '▸' : '▾'} ${rootName}`}
+          </Button>
+          {icon(rootEntry)}
+        </Box>,
+        { full: root, key: norm(root), isOpen: !isRootClosed, isProject: true },
+      )
+      if (isRootClosed) return
+      const before = rows.length
+      await walk(root, depth + 1)
+      if (rows.length === before) add(<Text dimColor wrap="truncate-end">{`${' '.repeat(depth * 2)}    This folder is empty.`}</Text>)
+    }
+
+    // a folder on the path above the project: always open, holding the next one down
+    const ancestorRow = (full: string, name: string, depth: number) => {
+      add(
+        <Box flexDirection="row" paddingLeft={depth * 2}>
+          {mark(false)}
+          <Text wrap="truncate-end">{`▾ ${name}`}</Text>
+          {icon({ name, kind: 'dir', size: 0, mtimeMs: 0, isLink: false })}
+        </Box>,
+        { full, key: norm(full), isOpen: true, isProject: false },
+      )
+    }
+
+    // `chain` is the rest of the path below `dir`, down to the project; where it is given,
+    // the next folder on it is drawn open in its place among its siblings
+    const walk = async (dir: string, depth: number, chain: string[] = []) => {
       let entries: FsEntry[] = []
       try {
         entries = await $.fs.list(dir)
-      } catch {
-        return
+      } catch (error) {
+        // above the project a refusal is shown, not hidden, so a blocked listing can be seen
+        if (chain.length > 0) add(<Text dimColor wrap="truncate-end">{`${' '.repeat(depth * 2)}  Couldn't list ${dir}: ${String(error)}`}</Text>)
+        else return
+      }
+      const next = chain[0]
+      const nextKey = next === undefined ? undefined : norm(next)
+      let isNextDrawn = false
+      const drawNext = async () => {
+        isNextDrawn = true
+        if (chain.length === 1) await projectRow(depth)
+        else {
+          ancestorRow(next!, nameOf(next!), depth)
+          await walk(next!, depth + 1, chain.slice(1))
+        }
       }
       for (const entry of entries.filter(one => !SKIP.has(one.name)).sort(byFoldersFirst)) {
         const full = join(dir, entry.name)
         const key = norm(full)
+        if (key === nextKey) {
+          await drawNext()
+          continue
+        }
         // the indent is padding and the name the only part allowed to give way, so a long
         // name gets cut short at the edge instead of squeezing its row out of line
         if (entry.kind === 'dir') {
           const isOpen = open.has(key)
           const hasEdits = !isOpen && marks.some(one => one.startsWith(`${key}/`))
-          rows.push(
+          add(
             <Box flexDirection="row" paddingLeft={depth * 2}>
-              {mark(hasEdits)}
+              {mark(hasEdits, hasEdits && isLatestIn(key))}
               <Box flexShrink={1} minWidth={0} overflow="hidden">
                 <Button key={`dir:${key}`} plain onPress={() => pressed(`dir:${key}`, () => toggle($, key))}>
                   {`${isOpen ? '▾' : '▸'} ${entry.name}`}
@@ -194,44 +403,66 @@ export const register: Register = on => {
               </Box>
               {icon(entry)}
             </Box>,
+            { full, key, isOpen, isProject: false },
           )
           if (isOpen) await walk(full, depth + 1)
         } else {
-          rows.push(
+          // the line this row lands on, for the pointer region to report against
+          const line = firstLine + rows.length
+          add(
             <Box flexDirection="row" paddingLeft={depth * 2}>
-              {mark(marks.includes(key))}
+              {mark(marks.includes(key), key === lastEdited)}
               <Box flexShrink={1} minWidth={0} overflow="hidden">
-                <Button key={`file:${key}`} plain dimColor onPress={() => pressed(`file:${key}`, () => openFile($, full))}>
-                  {`  ${entry.name}`}
-                </Button>
+                {Client !== undefined ? (
+                  <Client
+                    key={`file:${key}`}
+                    module="./file-row.tsx"
+                    props={{ path: full, label: entry.name, line, left: depth * 2 + markWidth }}
+                  />
+                ) : (
+                  <Button key={`file:${key}`} plain dimColor onPress={() => pressed(`file:${key}`, () => openFile($, full))}>
+                    {`  ${entry.name}`}
+                  </Button>
+                )}
               </Box>
               {icon(entry)}
             </Box>,
           )
         }
       }
+      // a path folder the listing hid (a skipped name, an unreadable parent) still leads down
+      if (next !== undefined && !isNextDrawn) await drawNext()
     }
-    const { value: isRootClosed = false } = await $.state.get({ plugin: 'pulse', key: 'isRootClosed' } as const)
-    if (!isRootClosed) await walk(root, 1)
 
-    // the session's own folder heads the tree, open until a person closes it
-    const rootName = root.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || root
-    const rootEntry: FsEntry = { name: rootName, kind: 'dir', size: 0, mtimeMs: 0, isLink: false }
+    if (isPathOpen && ancestors.length > 1) {
+      ancestorRow(ancestors[0]!, ancestors[0]!.replace(/\/$/, '') || '/', 0)
+      await walk(ancestors[0]!, 1, ancestors.slice(1))
+    } else {
+      await projectRow(0)
+    }
+    targets = lineTargets
 
-    // throwaway mouse probe, only on the surfaces that run surface modules; drag replaces it
-    const Client = e.surface === 'terminal' || e.surface === 'desktop' ? $.ui.resolve({ ...e, surface: e.surface }).Client : undefined
-
+    // every line here is one row tall, so the pointer's line maps onto `targets`
     return (
       <Box flexDirection="column">
-        {Client !== undefined && <Client key="mouse-probe" module="./mouse-probe.tsx" />}
-        <Box flexDirection="row">
-          {mark(isRootClosed && marks.some(one => one.startsWith(`${norm(root)}/`)))}
-          <Button key="root" plain onPress={() => pressed('root', () => toggleRoot($))}>
-            {`${isRootClosed ? '▸' : '▾'} ${rootName}`}
+        <Box flexDirection="row" gap={2}>
+          <Button key="return-root" plain onPress={() => pressed('return-root', () => setPathOpen($, false))}>
+            [ Return to root ]
           </Button>
-          {icon(rootEntry)}
+          <Button key="collapse-all" plain onPress={() => pressed('collapse-all', () => collapseAll($))}>
+            [ Collapse all ]
+          </Button>
         </Box>
-        {!isRootClosed && rows.length === 0 && <Text dimColor>{'    This folder is empty.'}</Text>}
+        {/* the drop icons' line is always there, blank until a drag, so no row moves */}
+        <Text bold={dragging !== ''} wrap="truncate-end">{dragging === '' ? ' ' : DROP_ICONS}</Text>
+        {isPathLineShown && (
+          <Box flexDirection="row">
+            {mark(false)}
+            <Button key="path" plain dimColor onPress={() => pressed('path', () => setPathOpen($, true))}>
+              {`▸ ${shortParent(root)}`}
+            </Button>
+          </Box>
+        )}
         {rows}
       </Box>
     )
