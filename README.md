@@ -8,11 +8,11 @@ A Claude Code mod that adds a file tree to the sidebar that enables you to:
 
 ### A pulsing mark shows what Claude is editing
 
-When Claude edits a file, the Claude mark appears next to that file in the tree. While Claude is still working on the turn, the mark gently pulses, fading in and out, so you can watch edits land as they happen. When the turn ends, the pulse stops and the mark holds still, so you can still see which files changed.
+When Claude edits a file, the Claude mark appears next to it in the tree. While Claude is still working on the turn, the mark gently pulses, fading in and out, so you can watch edits land as they happen. When the turn ends, the pulse stops and the mark holds still, so you can still see which files changed.
 
-When the next turn starts editing, the old marks clear and the new turn's files get marked instead. You only ever see the latest turn's changes, never a build-up from earlier ones.
+When the next turn starts editing, the old marks clear and the new turn's files get marked instead. You only ever see the latest turn's changes.
 
-If an edited file is inside a closed folder, the mark shows on the folder instead, so nothing is hidden. The mark sits in its own fixed space at the start of each row, so rows never shift when it appears or disappears.
+If an edited file is inside a closed folder, the mark shows on the folder instead, so nothing is hidden. 
 
 The mark appears for anything Claude changes with its Edit, Write, MultiEdit or NotebookEdit tools.
 
