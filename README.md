@@ -1,6 +1,9 @@
 # Pulse – file tree for Claude
 
-A Claude Code mod that adds a file tree to the sidebar, built around two ideas: you can see at a glance which files Claude is editing, and clicking a file opens it in the app you'd normally use for it.
+A Claude Code mod that adds a file tree to the sidebar that enables you to: 
+- See at a glance which files Claude is editing 
+- clicking a file opens it in the default app, such as obsidian.
+
 ## What makes it different
 
 ### A pulsing mark shows what Claude is editing
@@ -15,9 +18,10 @@ The mark appears for anything Claude changes with its Edit, Write, MultiEdit or 
 
 ### Files open in their default app
 
-Clicking a file doesn't open it inside Claude Code. It opens in whatever app Windows uses for that file type: a Markdown note in Obsidian, a spreadsheet in Excel, a PDF in your PDF reader, an image in your photo viewer. It's the same as double-clicking the file in File Explorer. If the file can't be opened, a short message says so.
+Clicking a file doesn't open it inside Claude Code. It opens in whatever app Windows uses for that file type: a Markdown note in Obsidian, a spreadsheet in Excel, a PDF in your PDF reader, and so on. 
 
-Each file shows an icon for its type from [Material Icon Theme](https://github.com/material-extensions/vscode-material-icon-theme), the same icons many people know from VS Code, so you can tell file types apart without reading the names. Around 45 common types have their own icon, from HTML, JavaScript and Python to Word, PDF, spreadsheets, images, audio and video. Any other type gets a plain page icon.
+Each file shows an icon for its type from [Material Icon Theme](https://github.com/material-extensions/vscode-material-icon-theme),  so you can tell file types apart without reading the names.
+
 
 ## Using it
 
