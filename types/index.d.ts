@@ -13,8 +13,14 @@ declare module 'claude-code' {
       isWorking: boolean
       // true once a person closes the session's own folder, which starts open
       isRootClosed: boolean
-      // true once a person unfolds the path line into the folders above the project
-      isPathOpen: boolean
+      // how many parent folders are shown above the project, 1 at each session start
+      climbed: number
+      // the file last clicked open in the tree this session, full path, empty when none
+      lastClicked: string
+      // the file whose row is flashing after Reveal last opened, normalised, empty when none
+      flashing: string
+      // true while a flashing row is lit
+      isFlashOn: boolean
       // the full path of the file being dragged, empty when none: the drop icons show
       dragging: string
     }

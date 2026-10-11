@@ -20,11 +20,11 @@ const join = (dir: string, name: string) => `${dir.replace(/[\\/]+$/, '')}/${nam
 const byFoldersFirst = (a: FsEntry, b: FsEntry) =>
   a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'dir' ? -1 : 1
 
-// the Claude mark as a drawing; while a turn runs it fades in and out smoothly
+// the Claude mark as a drawing; the latest edit's mark fades in and out twice (3 seconds), then holds still
 const markSvg = (isPulsing: boolean) => `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="14" height="14" viewBox="0 0 48 48">
   <g>${
     isPulsing
-      ? '<animate attributeName="opacity" values="1;0.25;1" dur="1.6s" repeatCount="indefinite" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1"/>'
+      ? '<animate attributeName="opacity" values="1;0.25;1" dur="1.5s" repeatCount="2" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1"/>'
       : ''
   }
     <image width="48" height="48" href="data:image/png;base64,${MARK_PNG}" xlink:href="data:image/png;base64,${MARK_PNG}"/>
@@ -65,16 +65,6 @@ const toggleRoot = async ($: Engine) => {
   await update($, { plugin: 'pulse', key: 'isRootClosed' } as const, (isClosed = false) => !isClosed)
 }
 
-const setPathOpen = async ($: Engine, isOpen: boolean) => {
-  await $.state.set({ plugin: 'pulse', key: 'isPathOpen' } as const, isOpen)
-}
-
-// closes every folder the person opened; the project folder and the path down to it stay open
-const collapseAll = async ($: Engine) => {
-  await $.state.set({ plugin: 'pulse', key: 'expanded' } as const, [])
-  await $.state.set({ plugin: 'pulse', key: 'isRootClosed' } as const, false)
-}
-
 // the folders from the drive down to the session's folder, each as a full path
 const ancestorsOf = (root: string) => {
   const parts = root.replace(/[\\/]+$/, '').split(/[\\/]/)
@@ -85,18 +75,70 @@ const ancestorsOf = (root: string) => {
   return chain
 }
 
-// the parent folder, shortened to the drive and its own name: C:\…\mods
-const shortParent = (root: string) => {
-  const parts = root.replace(/[\\/]+$/, '').split(/[\\/]/)
-  const parents = parts.slice(0, -1)
-  if (parents.length <= 1) return `${parents[0] ?? ''}\\`
+// a folder key, and every key inside it
+const isUnder = (key: string, folder: string) => key === folder || key.startsWith(`${folder}/`)
 
-  return parents.length === 2 ? parents.join('\\') : `${parents[0]}\\…\\${parents[parents.length - 1]}`
+// adds the next parent above the top line, until the drive
+const climbUp = async ($: Engine) => {
+  const most = ancestorsOf(await $.session.cwd()).length - 1
+  await update($, { plugin: 'pulse', key: 'climbed' } as const, (climbed = 1) => Math.min(climbed + 1, most))
+}
+
+// folds the climbed lines back to the one parent line, closing the folders above the project
+const returnToRoot = async ($: Engine) => {
+  const root = norm(await $.session.cwd())
+  await $.state.set({ plugin: 'pulse', key: 'climbed' } as const, 1)
+  await update($, { plugin: 'pulse', key: 'expanded' } as const, (list = []) => list.filter(key => isUnder(key, root)))
+}
+
+// closes every folder, the project folder included; the climbed lines stay, closed
+const collapseAll = async ($: Engine) => {
+  await $.state.set({ plugin: 'pulse', key: 'expanded' } as const, [])
+  await $.state.set({ plugin: 'pulse', key: 'isRootClosed' } as const, true)
+}
+
+// how long each half of a flash lasts; three flashes are six halves
+const FLASH_MS = 250
+
+// closes everything except the path to the last clicked file, then flashes its row three times
+const revealLastOpened = async ($: Engine) => {
+  const { value: file = '' } = await $.state.get({ plugin: 'pulse', key: 'lastClicked' } as const)
+  if (file === '' || !(await $.fs.exists(file))) {
+    $.ui.toast('Click a file first')
+    return
+  }
+  const root = await $.session.cwd()
+  const ancestors = ancestorsOf(root)
+  const fileKey = norm(file)
+  const folders = ancestorsOf(parentOf(file)).map(norm)
+  if (isUnder(fileKey, norm(root))) {
+    await $.state.set({ plugin: 'pulse', key: 'expanded' } as const, folders.filter(key => key.startsWith(`${norm(root)}/`)))
+    await $.state.set({ plugin: 'pulse', key: 'isRootClosed' } as const, false)
+  } else {
+    // the file sits beside the project: climb to the folder both share and open down from there
+    let shared = 0
+    ancestors.forEach((one, index) => {
+      if (fileKey.startsWith(`${norm(one)}/`)) shared = index
+    })
+    const top = norm(ancestors[shared]!)
+    await update($, { plugin: 'pulse', key: 'climbed' } as const, (climbed = 1) => Math.max(climbed, ancestors.length - 1 - shared))
+    await $.state.set({ plugin: 'pulse', key: 'expanded' } as const, folders.filter(key => isUnder(key, top)))
+    await $.state.set({ plugin: 'pulse', key: 'isRootClosed' } as const, true)
+  }
+  await $.state.set({ plugin: 'pulse', key: 'flashing' } as const, fileKey)
+  for (let half = 0; half < 6; half++) {
+    await $.state.set({ plugin: 'pulse', key: 'isFlashOn' } as const, half % 2 === 0)
+    await $.clock.sleep(FLASH_MS)
+  }
+  await $.state.set({ plugin: 'pulse', key: 'flashing' } as const, '')
+  await $.state.set({ plugin: 'pulse', key: 'isFlashOn' } as const, false)
 }
 
 // Explorer opens a file in its default app; says so when it can't instead of doing nothing
-// (explorer's exit code is 1 even on success, so only a failure to start counts)
+// (explorer's exit code is 1 even on success, so only a failure to start counts).
+// Every call is a click in the tree, so the file is remembered for Reveal last opened
 const openFile = async ($: Engine, full: string) => {
+  await $.state.set({ plugin: 'pulse', key: 'lastClicked' } as const, full)
   const path = full.replace(/\//g, '\\')
   try {
     await $.process.run(['explorer.exe', path])
@@ -106,7 +148,7 @@ const openFile = async ($: Engine, full: string) => {
 }
 
 // The pane draws one line per row, so a pointer's line says what it is over. The lines
-// above the tree are fixed: the buttons, then the drop icons, then the path line when shown
+// above the tree are fixed: the buttons, then the drop icons
 const DROP_LINE = 1
 // the drop row reads "[ Delete ]  [ Add to prompt ]": columns before this are Delete
 const DELETE_END = 11
@@ -203,6 +245,10 @@ const onDropped = async ($: Engine, data: Dropped) => {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'files', description: 'Show the file tree in the sidebar' })
+    // each session starts with one parent line and no remembered file
+    await $.state.set({ plugin: 'pulse', key: 'climbed' } as const, 1)
+    await $.state.set({ plugin: 'pulse', key: 'lastClicked' } as const, '')
+    await $.state.set({ plugin: 'pulse', key: 'flashing' } as const, '')
     void $.ui.open({ id: PANE, title: 'File tree' })
 
     return next(e)
@@ -220,7 +266,7 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // the pulse runs from the first edit until the turn ends, then the mark holds still
+  // a turn ending stops the pulse early; otherwise it runs out on its own after 3 seconds
   on('turn.complete', async ($, e, next) => {
     await $.state.set({ plugin: 'pulse', key: 'isWorking' } as const, false)
 
@@ -252,9 +298,10 @@ export const register: Register = on => {
     const element = e.element
     if (e.origin.kind !== 'person' || element === undefined) return result
     if (element === 'root') actOnce('focus', element, () => toggleRoot($))
-    else if (element === 'path') actOnce('focus', element, () => setPathOpen($, true))
-    else if (element === 'return-root') actOnce('focus', element, () => setPathOpen($, false))
+    else if (element === 'up') actOnce('focus', element, () => climbUp($))
+    else if (element === 'return-root') actOnce('focus', element, () => returnToRoot($))
     else if (element === 'collapse-all') actOnce('focus', element, () => collapseAll($))
+    else if (element === 'reveal') actOnce('focus', element, () => revealLastOpened($))
     else if (element.startsWith('dir:')) actOnce('focus', element, () => toggle($, element.slice(4)))
     else if (element.startsWith('file:')) actOnce('focus', element, () => openFile($, element.slice(5)))
 
@@ -309,7 +356,12 @@ export const register: Register = on => {
       ) : null
 
     const { value: isRootClosed = false } = await $.state.get({ plugin: 'pulse', key: 'isRootClosed' } as const)
-    const { value: isPathOpen = false } = await $.state.get({ plugin: 'pulse', key: 'isPathOpen' } as const)
+    const { value: climbedWanted = 1 } = await $.state.get({ plugin: 'pulse', key: 'climbed' } as const)
+    const { value: lastClicked = '' } = await $.state.get({ plugin: 'pulse', key: 'lastClicked' } as const)
+    const { value: flashing = '' } = await $.state.get({ plugin: 'pulse', key: 'flashing' } as const)
+    const { value: isFlashOn = false } = await $.state.get({ plugin: 'pulse', key: 'isFlashOn' } as const)
+    // greyed out until a file is clicked, and again once that file has moved or gone
+    const canReveal = lastClicked !== '' && (await $.fs.exists(lastClicked))
 
     // the session's own folder heads its part of the tree, open until a person closes it
     const rootName = root.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || root
@@ -319,9 +371,11 @@ export const register: Register = on => {
     // file rows hear the pointer only where surface modules run; elsewhere they stay buttons
     const Client = e.surface === 'terminal' || e.surface === 'desktop' ? $.ui.resolve({ ...e, surface: e.surface }).Client : undefined
     const ancestors = ancestorsOf(root)
-    const isPathLineShown = !isPathOpen && ancestors.length > 1
-    // the tree's first row sits under the buttons, the drop row and the path line
-    const firstLine = DROP_LINE + 1 + (isPathLineShown ? 1 : 0)
+    // how many parent lines sit above the project: one to start, none at the drive itself
+    const most = ancestors.length - 1
+    const climbed = Math.max(0, Math.min(climbedWanted, most))
+    // the tree's first row sits under the buttons and the drop row
+    const firstLine = DROP_LINE + 1
     const markWidth = canDraw ? 3 : 2
 
     const rows: RenderChildren[] = []
@@ -347,15 +401,22 @@ export const register: Register = on => {
       if (rows.length === before) add(<Text dimColor wrap="truncate-end">{`${' '.repeat(depth * 2)}    This folder is empty.`}</Text>)
     }
 
-    // a folder on the path above the project: always open, holding the next one down
+    // a climbed folder above the project: opening it shows its other folders and files,
+    // and closed or open, the next one down the path always shows beneath it
     const ancestorRow = (full: string, name: string, depth: number) => {
+      const key = norm(full)
+      const isOpen = open.has(key)
       add(
         <Box flexDirection="row" paddingLeft={depth * 2}>
           {mark(false)}
-          <Text wrap="truncate-end">{`▾ ${name}`}</Text>
+          <Box flexShrink={1} minWidth={0} overflow="hidden">
+            <Button key={`dir:${key}`} plain onPress={() => pressed(`dir:${key}`, () => toggle($, key))}>
+              {`${isOpen ? '▾' : '▸'} ${name}`}
+            </Button>
+          </Box>
           {icon({ name, kind: 'dir', size: 0, mtimeMs: 0, isLink: false })}
         </Box>,
-        { full, key: norm(full), isOpen: true, isProject: false },
+        { full, key, isOpen, isProject: false },
       )
     }
 
@@ -363,8 +424,10 @@ export const register: Register = on => {
     // the next folder on it is drawn open in its place among its siblings
     const walk = async (dir: string, depth: number, chain: string[] = []) => {
       let entries: FsEntry[] = []
+      // a closed folder above the project lists nothing but the next one down the path
+      const isClosedAbove = chain.length > 0 && !open.has(norm(dir))
       try {
-        entries = await $.fs.list(dir)
+        if (!isClosedAbove) entries = await $.fs.list(dir)
       } catch (error) {
         // above the project a refusal is shown, not hidden, so a blocked listing can be seen
         if (chain.length > 0) add(<Text dimColor wrap="truncate-end">{`${' '.repeat(depth * 2)}  Couldn't list ${dir}: ${String(error)}`}</Text>)
@@ -417,10 +480,10 @@ export const register: Register = on => {
                   <Client
                     key={`file:${key}`}
                     module="./file-row.tsx"
-                    props={{ path: full, label: entry.name, line, left: depth * 2 + markWidth }}
+                    props={{ path: full, label: entry.name, line, left: depth * 2 + markWidth, isLit: flashing === key && isFlashOn }}
                   />
                 ) : (
-                  <Button key={`file:${key}`} plain dimColor onPress={() => pressed(`file:${key}`, () => openFile($, full))}>
+                  <Button key={`file:${key}`} plain dimColor={!(flashing === key && isFlashOn)} onPress={() => pressed(`file:${key}`, () => openFile($, full))}>
                     {`  ${entry.name}`}
                   </Button>
                 )}
@@ -434,9 +497,10 @@ export const register: Register = on => {
       if (next !== undefined && !isNextDrawn) await drawNext()
     }
 
-    if (isPathOpen && ancestors.length > 1) {
-      ancestorRow(ancestors[0]!, ancestors[0]!.replace(/\/$/, '') || '/', 0)
-      await walk(ancestors[0]!, 1, ancestors.slice(1))
+    if (climbed > 0) {
+      const top = ancestors[most - climbed]!
+      ancestorRow(top, nameOf(top) || top.replace(/\/$/, '') || '/', 0)
+      await walk(top, 1, ancestors.slice(most - climbed + 1))
     } else {
       await projectRow(0)
     }
@@ -446,23 +510,23 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         <Box flexDirection="row" gap={2}>
-          <Button key="return-root" plain onPress={() => pressed('return-root', () => setPathOpen($, false))}>
-            [ Return to root ]
-          </Button>
           <Button key="collapse-all" plain onPress={() => pressed('collapse-all', () => collapseAll($))}>
-            [ Collapse all ]
+            ⇲ Collapse
+          </Button>
+          {climbed < most && (
+            <Button key="up" plain onPress={() => pressed('up', () => climbUp($))}>
+              ↑ Up
+            </Button>
+          )}
+          <Button key="return-root" plain onPress={() => pressed('return-root', () => returnToRoot($))}>
+            ⌂ Root
+          </Button>
+          <Button key="reveal" plain dimColor={!canReveal} onPress={() => pressed('reveal', () => revealLastOpened($))}>
+            ◎ Reveal
           </Button>
         </Box>
         {/* the drop icons' line is always there, blank until a drag, so no row moves */}
         <Text bold={dragging !== ''} wrap="truncate-end">{dragging === '' ? ' ' : DROP_ICONS}</Text>
-        {isPathLineShown && (
-          <Box flexDirection="row">
-            {mark(false)}
-            <Button key="path" plain dimColor onPress={() => pressed('path', () => setPathOpen($, true))}>
-              {`▸ ${shortParent(root)}`}
-            </Button>
-          </Box>
-        )}
         {rows}
       </Box>
     )

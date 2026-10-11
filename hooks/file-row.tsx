@@ -5,7 +5,8 @@ import type { ClientModule, ClientPointerEvent } from 'claude-code'
 // pane line under the pointer (this row's line plus how far the pointer went) and the
 // pane column, so the hooks module can tell which row or drop icon it is over.
 
-type Props = { path: string; label: string; line: number; left: number }
+// isLit is true while the row flashes after Reveal last opened
+type Props = { path: string; label: string; line: number; left: number; isLit: boolean }
 type Held = { x: number; y: number; isDragging: boolean }
 // one box for the instance's life: the listener is set once and reads the latest through it
 type Live = { latest: Props; held: Held | undefined }
@@ -42,11 +43,11 @@ const FileRow: ClientModule<Props, Local> = (props, surface) => {
     })
   }
 
-  const isDragging = live.held?.isDragging === true
+  const isLit = live.held?.isDragging === true || props.isLit
 
   return (
     <Box flexDirection="row" overflow="hidden">
-      <Text dimColor={!isDragging} inverse={isDragging} wrap="truncate-end">
+      <Text dimColor={!isLit} inverse={isLit} wrap="truncate-end">
         {`  ${props.label}`}
       </Text>
     </Box>
