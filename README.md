@@ -10,9 +10,9 @@ A Claude Code mod that adds a file tree to the sidebar that enables you to:
 
 ### A pulsing mark shows what Claude is editing
 
-When Claude edits a file, the Claude mark appears next to it in the tree. While Claude is still working on the turn, the mark gently pulses, fading in and out, so you can watch edits land as they happen. When the turn ends, the pulse stops and the mark holds still, so you can still see which files changed.
+When Claude edits a file, the Claude mark appears next to it in the tree. While Claude is still working on the turn, the mark on the file it edited most recently gently pulses, fading in and out, and earlier marks hold still, so you can follow each edit as it lands. When the edit ends, the pulse stops and the mark holds still, so you can still see which files changed.
 
-When the next turn starts editing, the old marks clear and the new turn's files get marked instead. You only ever see the latest turn's changes.
+When Claude starts editing in the next turn, the old edit marks clear and the new turn's files get marked instead. 
 
 If an edited file is inside a closed folder, the mark shows on the folder instead, so nothing is hidden. 
 
@@ -41,10 +41,13 @@ The tree opens in the sidebar when a session starts. If you close it, type `/fil
 
 ## Install
 
-In Claude Code, run:
+In Claude Code, run these two commands one at a time. 
 
 ```
 /plugin marketplace add its-coughfee/pulse-file-tree
+```
+
+```
 /plugin install pulse@alex-plugins
 ```
 
