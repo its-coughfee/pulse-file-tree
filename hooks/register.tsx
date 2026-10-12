@@ -53,8 +53,15 @@ const actOnce = (via: Via, element: string, act: () => Promise<void>) => {
   if (!isTwin) void act()
 }
 
+// a folder opened by hand drops what Collapse saved, so Expand never overrides something done since
+const forgetSaved = async ($: Engine) => {
+  await $.state.set({ plugin: 'pulse', key: 'hasSaved' } as const, false)
+}
+
 // flips the folder against what is stored now, not what a drawing saw
 const toggle = async ($: Engine, key: string) => {
+  const { value: list = [] } = await $.state.get({ plugin: 'pulse', key: 'expanded' } as const)
+  if (!list.includes(key)) await forgetSaved($)
   await update($, { plugin: 'pulse', key: 'expanded' } as const, (list = []) =>
     list.includes(key) ? list.filter(one => one !== key) : [...list, key],
   )
@@ -62,6 +69,8 @@ const toggle = async ($: Engine, key: string) => {
 
 // the session's own folder starts open, so its stored flag is the other way round
 const toggleRoot = async ($: Engine) => {
+  const { value: isClosed = false } = await $.state.get({ plugin: 'pulse', key: 'isRootClosed' } as const)
+  if (isClosed) await forgetSaved($)
   await update($, { plugin: 'pulse', key: 'isRootClosed' } as const, (isClosed = false) => !isClosed)
 }
 
@@ -91,16 +100,34 @@ const returnToRoot = async ($: Engine) => {
   await update($, { plugin: 'pulse', key: 'expanded' } as const, (list = []) => list.filter(key => isUnder(key, root)))
 }
 
-// closes every folder, the project folder included; the climbed lines stay, closed
+// closes every folder, the project folder included, remembering which were open so Expand
+// can put them back; the climbed lines stay, closed
 const collapseAll = async ($: Engine) => {
+  const { value: expanded = [] } = await $.state.get({ plugin: 'pulse', key: 'expanded' } as const)
+  const { value: isRootClosed = false } = await $.state.get({ plugin: 'pulse', key: 'isRootClosed' } as const)
+  await $.state.set({ plugin: 'pulse', key: 'savedExpanded' } as const, expanded)
+  await $.state.set({ plugin: 'pulse', key: 'savedRootClosed' } as const, isRootClosed)
+  await $.state.set({ plugin: 'pulse', key: 'hasSaved' } as const, true)
   await $.state.set({ plugin: 'pulse', key: 'expanded' } as const, [])
   await $.state.set({ plugin: 'pulse', key: 'isRootClosed' } as const, true)
 }
 
-// how long each half of a flash lasts; three flashes are six halves
-const FLASH_MS = 250
+// reopens the folders Collapse closed, and forgets them
+const expandSaved = async ($: Engine) => {
+  const { value: savedExpanded = [] } = await $.state.get({ plugin: 'pulse', key: 'savedExpanded' } as const)
+  const { value: savedRootClosed = false } = await $.state.get({ plugin: 'pulse', key: 'savedRootClosed' } as const)
+  await $.state.set({ plugin: 'pulse', key: 'expanded' } as const, savedExpanded)
+  await $.state.set({ plugin: 'pulse', key: 'isRootClosed' } as const, savedRootClosed)
+  await forgetSaved($)
+}
 
-// closes everything except the path to the last clicked file, then flashes its row three times
+// the button is Collapse until something is saved, then Expand until it is used or overridden
+const collapseOrExpand = async ($: Engine) => {
+  const { value: hasSaved = false } = await $.state.get({ plugin: 'pulse', key: 'hasSaved' } as const)
+  await (hasSaved ? expandSaved($) : collapseAll($))
+}
+
+// closes everything except the path to the last clicked file, then leaves its row highlighted
 const revealLastOpened = async ($: Engine) => {
   const { value: file = '' } = await $.state.get({ plugin: 'pulse', key: 'lastClicked' } as const)
   if (file === '' || !(await $.fs.exists(file))) {
@@ -125,20 +152,17 @@ const revealLastOpened = async ($: Engine) => {
     await $.state.set({ plugin: 'pulse', key: 'expanded' } as const, folders.filter(key => isUnder(key, top)))
     await $.state.set({ plugin: 'pulse', key: 'isRootClosed' } as const, true)
   }
-  await $.state.set({ plugin: 'pulse', key: 'flashing' } as const, fileKey)
-  for (let half = 0; half < 6; half++) {
-    await $.state.set({ plugin: 'pulse', key: 'isFlashOn' } as const, half % 2 === 0)
-    await $.clock.sleep(FLASH_MS)
-  }
-  await $.state.set({ plugin: 'pulse', key: 'flashing' } as const, '')
-  await $.state.set({ plugin: 'pulse', key: 'isFlashOn' } as const, false)
+  await forgetSaved($)
+  await $.state.set({ plugin: 'pulse', key: 'revealed' } as const, fileKey)
 }
 
 // Explorer opens a file in its default app; says so when it can't instead of doing nothing
 // (explorer's exit code is 1 even on success, so only a failure to start counts).
-// Every call is a click in the tree, so the file is remembered for Reveal last opened
+// Every call is a click in the tree, so the file is remembered for Reveal last opened,
+// and a click ends the previous reveal's highlight
 const openFile = async ($: Engine, full: string) => {
   await $.state.set({ plugin: 'pulse', key: 'lastClicked' } as const, full)
+  await $.state.set({ plugin: 'pulse', key: 'revealed' } as const, '')
   const path = full.replace(/\//g, '\\')
   try {
     await $.process.run(['explorer.exe', path])
@@ -248,7 +272,8 @@ export const register: Register = on => {
     // each session starts with one parent line and no remembered file
     await $.state.set({ plugin: 'pulse', key: 'climbed' } as const, 1)
     await $.state.set({ plugin: 'pulse', key: 'lastClicked' } as const, '')
-    await $.state.set({ plugin: 'pulse', key: 'flashing' } as const, '')
+    await $.state.set({ plugin: 'pulse', key: 'revealed' } as const, '')
+    await $.state.set({ plugin: 'pulse', key: 'hasSaved' } as const, false)
     void $.ui.open({ id: PANE, title: 'File tree' })
 
     return next(e)
@@ -300,7 +325,7 @@ export const register: Register = on => {
     if (element === 'root') actOnce('focus', element, () => toggleRoot($))
     else if (element === 'up') actOnce('focus', element, () => climbUp($))
     else if (element === 'return-root') actOnce('focus', element, () => returnToRoot($))
-    else if (element === 'collapse-all') actOnce('focus', element, () => collapseAll($))
+    else if (element === 'collapse-all') actOnce('focus', element, () => collapseOrExpand($))
     else if (element === 'reveal') actOnce('focus', element, () => revealLastOpened($))
     else if (element.startsWith('dir:')) actOnce('focus', element, () => toggle($, element.slice(4)))
     else if (element.startsWith('file:')) actOnce('focus', element, () => openFile($, element.slice(5)))
@@ -358,8 +383,8 @@ export const register: Register = on => {
     const { value: isRootClosed = false } = await $.state.get({ plugin: 'pulse', key: 'isRootClosed' } as const)
     const { value: climbedWanted = 1 } = await $.state.get({ plugin: 'pulse', key: 'climbed' } as const)
     const { value: lastClicked = '' } = await $.state.get({ plugin: 'pulse', key: 'lastClicked' } as const)
-    const { value: flashing = '' } = await $.state.get({ plugin: 'pulse', key: 'flashing' } as const)
-    const { value: isFlashOn = false } = await $.state.get({ plugin: 'pulse', key: 'isFlashOn' } as const)
+    const { value: revealed = '' } = await $.state.get({ plugin: 'pulse', key: 'revealed' } as const)
+    const { value: hasSaved = false } = await $.state.get({ plugin: 'pulse', key: 'hasSaved' } as const)
     // greyed out until a file is clicked, and again once that file has moved or gone
     const canReveal = lastClicked !== '' && (await $.fs.exists(lastClicked))
 
@@ -384,9 +409,19 @@ export const register: Register = on => {
       rows.push(row)
       lineTargets[firstLine + rows.length - 1] = target
     }
-    const projectRow = async (depth: number) => {
+    // Guide lines take the place of the indent, at exactly its width (two cells a level), so
+    // row positions and the file rows' `left` stay as they were. A row's `guides` are the
+    // columns of its parent's ancestors: `│ ` where that ancestor has folders still to come
+    // below, blank where it has none. The parent's own column joins a folder with `├ ` or
+    // `└ ` (the last folder), and runs `│ ` past a file while folders still follow it
+    const guide = (text: string) => <Text dimColor>{text}</Text>
+    const rowPrefix = (guides: string, depth: number, isLast: boolean) => (depth === 0 ? '' : `${guides}${isLast ? '└ ' : '├ '}`)
+    const childGuides = (guides: string, depth: number, isLast: boolean) => (depth === 0 ? '' : `${guides}${isLast ? '  ' : '│ '}`)
+
+    const projectRow = async (depth: number, guides = '', isLast = true) => {
       add(
-        <Box flexDirection="row" paddingLeft={depth * 2}>
+        <Box flexDirection="row">
+          {guide(rowPrefix(guides, depth, isLast))}
           {mark(isRootClosed && marks.some(one => one.startsWith(`${norm(root)}/`)), isRootClosed && isLatestIn(norm(root)))}
           <Button key="root" plain onPress={() => pressed('root', () => toggleRoot($))}>
             {`${isRootClosed ? '▸' : '▾'} ${rootName}`}
@@ -397,17 +432,19 @@ export const register: Register = on => {
       )
       if (isRootClosed) return
       const before = rows.length
-      await walk(root, depth + 1)
-      if (rows.length === before) add(<Text dimColor wrap="truncate-end">{`${' '.repeat(depth * 2)}    This folder is empty.`}</Text>)
+      const below = childGuides(guides, depth, isLast)
+      await walk(root, depth + 1, [], below)
+      if (rows.length === before) add(<Text dimColor wrap="truncate-end">{`${below}    This folder is empty.`}</Text>)
     }
 
     // a climbed folder above the project: opening it shows its other folders and files,
     // and closed or open, the next one down the path always shows beneath it
-    const ancestorRow = (full: string, name: string, depth: number) => {
+    const ancestorRow = (full: string, name: string, prefix: string) => {
       const key = norm(full)
       const isOpen = open.has(key)
       add(
-        <Box flexDirection="row" paddingLeft={depth * 2}>
+        <Box flexDirection="row">
+          {guide(prefix)}
           {mark(false)}
           <Box flexShrink={1} minWidth={0} overflow="hidden">
             <Button key={`dir:${key}`} plain onPress={() => pressed(`dir:${key}`, () => toggle($, key))}>
@@ -421,8 +458,9 @@ export const register: Register = on => {
     }
 
     // `chain` is the rest of the path below `dir`, down to the project; where it is given,
-    // the next folder on it is drawn open in its place among its siblings
-    const walk = async (dir: string, depth: number, chain: string[] = []) => {
+    // the next folder on it is drawn open in its place among its siblings. `guides` are
+    // the guide-line columns of `dir`'s ancestors, two cells a level
+    const walk = async (dir: string, depth: number, chain: string[] = [], guides = '') => {
       let entries: FsEntry[] = []
       // a closed folder above the project lists nothing but the next one down the path
       const isClosedAbove = chain.length > 0 && !open.has(norm(dir))
@@ -430,34 +468,40 @@ export const register: Register = on => {
         if (!isClosedAbove) entries = await $.fs.list(dir)
       } catch (error) {
         // above the project a refusal is shown, not hidden, so a blocked listing can be seen
-        if (chain.length > 0) add(<Text dimColor wrap="truncate-end">{`${' '.repeat(depth * 2)}  Couldn't list ${dir}: ${String(error)}`}</Text>)
+        if (chain.length > 0) add(<Text dimColor wrap="truncate-end">{`${guides}    Couldn't list ${dir}: ${String(error)}`}</Text>)
         else return
       }
       const next = chain[0]
       const nextKey = next === undefined ? undefined : norm(next)
+      const listed = entries.filter(one => !SKIP.has(one.name)).sort(byFoldersFirst)
+      // the path folder is a folder too, drawn at the end where the listing hid it
+      const isNextHidden = next !== undefined && !listed.some(one => norm(join(dir, one.name)) === nextKey)
+      const lastFolder = isNextHidden ? -1 : listed.length - 1 - [...listed].reverse().findIndex(one => one.kind === 'dir')
       let isNextDrawn = false
-      const drawNext = async () => {
+      const drawNext = async (isLast: boolean) => {
         isNextDrawn = true
-        if (chain.length === 1) await projectRow(depth)
+        if (chain.length === 1) await projectRow(depth, guides, isLast)
         else {
-          ancestorRow(next!, nameOf(next!), depth)
-          await walk(next!, depth + 1, chain.slice(1))
+          ancestorRow(next!, nameOf(next!), rowPrefix(guides, depth, isLast))
+          await walk(next!, depth + 1, chain.slice(1), childGuides(guides, depth, isLast))
         }
       }
-      for (const entry of entries.filter(one => !SKIP.has(one.name)).sort(byFoldersFirst)) {
+      for (const [index, entry] of listed.entries()) {
         const full = join(dir, entry.name)
         const key = norm(full)
+        const isLast = index === lastFolder
         if (key === nextKey) {
-          await drawNext()
+          await drawNext(isLast)
           continue
         }
-        // the indent is padding and the name the only part allowed to give way, so a long
+        // the indent is guide lines and the name the only part allowed to give way, so a long
         // name gets cut short at the edge instead of squeezing its row out of line
         if (entry.kind === 'dir') {
           const isOpen = open.has(key)
           const hasEdits = !isOpen && marks.some(one => one.startsWith(`${key}/`))
           add(
-            <Box flexDirection="row" paddingLeft={depth * 2}>
+            <Box flexDirection="row">
+              {guide(rowPrefix(guides, depth, isLast))}
               {mark(hasEdits, hasEdits && isLatestIn(key))}
               <Box flexShrink={1} minWidth={0} overflow="hidden">
                 <Button key={`dir:${key}`} plain onPress={() => pressed(`dir:${key}`, () => toggle($, key))}>
@@ -468,22 +512,23 @@ export const register: Register = on => {
             </Box>,
             { full, key, isOpen, isProject: false },
           )
-          if (isOpen) await walk(full, depth + 1)
+          if (isOpen) await walk(full, depth + 1, [], childGuides(guides, depth, isLast))
         } else {
           // the line this row lands on, for the pointer region to report against
           const line = firstLine + rows.length
           add(
-            <Box flexDirection="row" paddingLeft={depth * 2}>
+            <Box flexDirection="row">
+              {guide(`${guides}${isNextHidden ? '│ ' : '  '}`)}
               {mark(marks.includes(key), key === lastEdited)}
               <Box flexShrink={1} minWidth={0} overflow="hidden">
                 {Client !== undefined ? (
                   <Client
                     key={`file:${key}`}
                     module="./file-row.tsx"
-                    props={{ path: full, label: entry.name, line, left: depth * 2 + markWidth, isLit: flashing === key && isFlashOn }}
+                    props={{ path: full, label: entry.name, line, left: depth * 2 + markWidth, isRevealed: revealed === key }}
                   />
                 ) : (
-                  <Button key={`file:${key}`} plain dimColor={!(flashing === key && isFlashOn)} onPress={() => pressed(`file:${key}`, () => openFile($, full))}>
+                  <Button key={`file:${key}`} plain dimColor={revealed !== key} onPress={() => pressed(`file:${key}`, () => openFile($, full))}>
                     {`  ${entry.name}`}
                   </Button>
                 )}
@@ -494,12 +539,12 @@ export const register: Register = on => {
         }
       }
       // a path folder the listing hid (a skipped name, an unreadable parent) still leads down
-      if (next !== undefined && !isNextDrawn) await drawNext()
+      if (next !== undefined && !isNextDrawn) await drawNext(true)
     }
 
     if (climbed > 0) {
       const top = ancestors[most - climbed]!
-      ancestorRow(top, nameOf(top) || top.replace(/\/$/, '') || '/', 0)
+      ancestorRow(top, nameOf(top) || top.replace(/\/$/, '') || '/', '')
       await walk(top, 1, ancestors.slice(most - climbed + 1))
     } else {
       await projectRow(0)
@@ -509,9 +554,10 @@ export const register: Register = on => {
     // every line here is one row tall, so the pointer's line maps onto `targets`
     return (
       <Box flexDirection="column">
-        <Box flexDirection="row" gap={2}>
-          <Button key="collapse-all" plain onPress={() => pressed('collapse-all', () => collapseAll($))}>
-            ⇲ Collapse
+        <Box flexDirection="row" gap={1}>
+          {/* Expand is padded to Collapse's width, so the buttons to its right never shift */}
+          <Button key="collapse-all" plain onPress={() => pressed('collapse-all', () => collapseOrExpand($))}>
+            {hasSaved ? '⇱ Expand  ' : '⇲ Collapse'}
           </Button>
           {climbed < most && (
             <Button key="up" plain onPress={() => pressed('up', () => climbUp($))}>

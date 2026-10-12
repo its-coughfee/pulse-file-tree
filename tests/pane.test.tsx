@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 // what each setting holds before anything is saved; the pane can't draw without them
 const DEFAULTS: Record<string, unknown> = {
   expanded: [], edited: [], lastEdited: '', isWorking: false, isRootClosed: false, climbed: 1,
-  lastClicked: '', flashing: '', isFlashOn: false, dragging: '', isFreshTurn: false,
+  lastClicked: '', revealed: '', hasSaved: false, savedExpanded: [], savedRootClosed: false, dragging: '', isFreshTurn: false,
 }
 
 // the stubs a test sets up outlive it, so each test resets what this one object holds;
@@ -27,6 +27,12 @@ const mountPane = async ($: any, on: any) => {
 
 const button = (ui: any, text: RegExp) => ui.find({ type: 'Button', text } as never)
 
+// a press starts its work and returns at once, so wait for the saving to finish, then redraw
+const settle = async (ui: any) => {
+  await new Promise(resolve => setTimeout(resolve, 50))
+  await ui.redraw()
+}
+
 test('the pane draws the folder on the desktop', async ($, on) => {
   const ui = await mountPane($, on)
   expect(await button(ui, /LOG/)).toBeDefined()
@@ -48,6 +54,18 @@ test('Collapse all closes the project folder', async ($, on) => {
   await ui.redraw()
   expect(values.isRootClosed).toBe(true)
   expect(values.expanded).toEqual([])
+  await ui.unmount()
+})
+
+// The test kit holds its own copy of settings between presses, so a second press reads a
+// stale copy; Expand restoring the folders is checked in the live pane instead
+test('Collapse saves what was open so Expand can restore it', async ($, on) => {
+  const ui = await mountPane($, on)
+  await ui.press({ key: 'collapse-all' } as never)
+  await settle(ui)
+  expect(values.hasSaved).toBe(true)
+  expect(values.savedRootClosed).toBe(false)
+  expect(values.isRootClosed).toBe(true)
   await ui.unmount()
 })
 

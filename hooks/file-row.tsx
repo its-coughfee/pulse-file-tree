@@ -5,8 +5,11 @@ import type { ClientModule, ClientPointerEvent } from 'claude-code'
 // pane line under the pointer (this row's line plus how far the pointer went) and the
 // pane column, so the hooks module can tell which row or drop icon it is over.
 
-// isLit is true while the row flashes after Reveal last opened
-type Props = { path: string; label: string; line: number; left: number; isLit: boolean }
+// isRevealed is true while the row is the one Reveal last opened showed
+type Props = { path: string; label: string; line: number; left: number; isRevealed: boolean }
+// a soft grey behind a revealed row, readable in light and dark; the engine tells mods
+// neither theme, so one middle grey serves both
+const REVEALED_GREY = '#808080'
 type Held = { x: number; y: number; isDragging: boolean }
 // one box for the instance's life: the listener is set once and reads the latest through it
 type Live = { latest: Props; held: Held | undefined }
@@ -43,11 +46,18 @@ const FileRow: ClientModule<Props, Local> = (props, surface) => {
     })
   }
 
-  const isLit = live.held?.isDragging === true || props.isLit
+  // a dragged row keeps the inverted look; a revealed one sits on grey, so the two stay distinct
+  const isDragged = live.held?.isDragging === true
+  const isRevealed = !isDragged && props.isRevealed
 
   return (
     <Box flexDirection="row" overflow="hidden">
-      <Text dimColor={!isLit} inverse={isLit} wrap="truncate-end">
+      <Text
+        dimColor={!isDragged && !isRevealed}
+        inverse={isDragged}
+        backgroundColor={isRevealed ? REVEALED_GREY : undefined}
+        wrap="truncate-end"
+      >
         {`  ${props.label}`}
       </Text>
     </Box>

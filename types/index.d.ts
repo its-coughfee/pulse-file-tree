@@ -17,10 +17,13 @@ declare module 'claude-code' {
       climbed: number
       // the file last clicked open in the tree this session, full path, empty when none
       lastClicked: string
-      // the file whose row is flashing after Reveal last opened, normalised, empty when none
-      flashing: string
-      // true while a flashing row is lit
-      isFlashOn: boolean
+      // the file whose row stays highlighted after Reveal last opened, normalised, empty when none
+      revealed: string
+      // true from Collapse until Expand is pressed or a folder is opened by hand: the button reads Expand
+      hasSaved: boolean
+      // the folders open when Collapse was pressed, and whether the project folder was closed, for Expand to put back
+      savedExpanded: string[]
+      savedRootClosed: boolean
       // the full path of the file being dragged, empty when none: the drop icons show
       dragging: string
     }
