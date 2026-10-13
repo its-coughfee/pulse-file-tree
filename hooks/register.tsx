@@ -410,19 +410,20 @@ export const register: Register = on => {
       lineTargets[firstLine + rows.length - 1] = target
     }
     // Guide lines take the place of the indent, at exactly its width (two cells a level), so
-    // row positions and the file rows' `left` stay as they were. A row's `guides` are the
-    // columns of its parent's ancestors: `│ ` where that ancestor has folders still to come
-    // below, blank where it has none. The parent's own column joins a folder with `├ ` or
-    // `└ ` (the last folder), and runs `│ ` past a file while folders still follow it
+    // row positions and the file rows' `left` stay as they were. The mark slot comes first, so
+    // each vertical drops from under its parent's arrow. A row's `guides` are the columns of
+    // its parent's ancestors: `│ ` where that ancestor has folders still to come below, blank
+    // where it has none. The parent's own column joins a folder with `├─` or `└─` (the last
+    // folder), running into its arrow, and runs `│ ` past a file while folders still follow it
     const guide = (text: string) => <Text dimColor>{text}</Text>
-    const rowPrefix = (guides: string, depth: number, isLast: boolean) => (depth === 0 ? '' : `${guides}${isLast ? '└ ' : '├ '}`)
+    const rowPrefix = (guides: string, depth: number, isLast: boolean) => (depth === 0 ? '' : `${guides}${isLast ? '└─' : '├─'}`)
     const childGuides = (guides: string, depth: number, isLast: boolean) => (depth === 0 ? '' : `${guides}${isLast ? '  ' : '│ '}`)
 
     const projectRow = async (depth: number, guides = '', isLast = true) => {
       add(
         <Box flexDirection="row">
-          {guide(rowPrefix(guides, depth, isLast))}
           {mark(isRootClosed && marks.some(one => one.startsWith(`${norm(root)}/`)), isRootClosed && isLatestIn(norm(root)))}
+          {guide(rowPrefix(guides, depth, isLast))}
           <Button key="root" plain onPress={() => pressed('root', () => toggleRoot($))}>
             {`${isRootClosed ? '▸' : '▾'} ${rootName}`}
           </Button>
@@ -434,7 +435,7 @@ export const register: Register = on => {
       const before = rows.length
       const below = childGuides(guides, depth, isLast)
       await walk(root, depth + 1, [], below)
-      if (rows.length === before) add(<Text dimColor wrap="truncate-end">{`${below}    This folder is empty.`}</Text>)
+      if (rows.length === before) add(<Text dimColor wrap="truncate-end">{`${' '.repeat(markWidth)}${below}  This folder is empty.`}</Text>)
     }
 
     // a climbed folder above the project: opening it shows its other folders and files,
@@ -444,8 +445,8 @@ export const register: Register = on => {
       const isOpen = open.has(key)
       add(
         <Box flexDirection="row">
-          {guide(prefix)}
           {mark(false)}
+          {guide(prefix)}
           <Box flexShrink={1} minWidth={0} overflow="hidden">
             <Button key={`dir:${key}`} plain onPress={() => pressed(`dir:${key}`, () => toggle($, key))}>
               {`${isOpen ? '▾' : '▸'} ${name}`}
@@ -468,7 +469,7 @@ export const register: Register = on => {
         if (!isClosedAbove) entries = await $.fs.list(dir)
       } catch (error) {
         // above the project a refusal is shown, not hidden, so a blocked listing can be seen
-        if (chain.length > 0) add(<Text dimColor wrap="truncate-end">{`${guides}    Couldn't list ${dir}: ${String(error)}`}</Text>)
+        if (chain.length > 0) add(<Text dimColor wrap="truncate-end">{`${' '.repeat(markWidth)}${guides}  Couldn't list ${dir}: ${String(error)}`}</Text>)
         else return
       }
       const next = chain[0]
@@ -501,8 +502,8 @@ export const register: Register = on => {
           const hasEdits = !isOpen && marks.some(one => one.startsWith(`${key}/`))
           add(
             <Box flexDirection="row">
-              {guide(rowPrefix(guides, depth, isLast))}
               {mark(hasEdits, hasEdits && isLatestIn(key))}
+              {guide(rowPrefix(guides, depth, isLast))}
               <Box flexShrink={1} minWidth={0} overflow="hidden">
                 <Button key={`dir:${key}`} plain onPress={() => pressed(`dir:${key}`, () => toggle($, key))}>
                   {`${isOpen ? '▾' : '▸'} ${entry.name}`}
@@ -518,8 +519,8 @@ export const register: Register = on => {
           const line = firstLine + rows.length
           add(
             <Box flexDirection="row">
-              {guide(`${guides}${isNextHidden ? '│ ' : '  '}`)}
               {mark(marks.includes(key), key === lastEdited)}
+              {guide(`${guides}${isNextHidden ? '│ ' : '  '}`)}
               <Box flexShrink={1} minWidth={0} overflow="hidden">
                 {Client !== undefined ? (
                   <Client

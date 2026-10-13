@@ -48,6 +48,14 @@ test('one closed parent line sits above the project, with the up button', async 
   await ui.unmount()
 })
 
+// the closed parent line shows only the project, joined by └─; the project's one folder, LOG,
+// is joined by └─ under a blank column. The mark slot sits ahead of both
+test('guide ticks run right into each folder arrow', async ($, on) => {
+  const ui = await mountPane($, on)
+  expect((await ui.find({ text: /▸ projects/ } as never))?.text).toMatch(/▸ projects\s+└─▾ demo\s+└─▸ LOG/)
+  await ui.unmount()
+})
+
 test('Collapse all closes the project folder', async ($, on) => {
   const ui = await mountPane($, on)
   await ui.press({ key: 'collapse-all' } as never)
